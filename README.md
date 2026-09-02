@@ -78,10 +78,16 @@ single OIDC login.
 
 Non-goals and the parked backlog are in [docs/v2-backlog.md](docs/v2-backlog.md).
 
+## Documentation
+
+- [docs/design.md](docs/design.md), the original specification
+- [docs/join-key.md](docs/join-key.md), the convention every screen depends on
+- [docs/decisions/](docs/decisions/), the accepted decision records
+- [docs/v2-backlog.md](docs/v2-backlog.md), what is parked and why
+
 ## Decisions
 
-Significant choices are recorded in [docs/decisions/](docs/decisions/). Two are
-worth reading before touching the chart:
+Two decision records are worth reading before touching the chart:
 
 - [0009](docs/decisions/0009-grafana-helm-chart-repo-split.md): `grafana`, `loki`
   and `tempo` come from `grafana-community`. The `loki` chart left in

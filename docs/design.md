@@ -1,7 +1,13 @@
-# Service-Centric Observability Platform — Design Document
+# Inside Man: Design Document
 
-**Status:** Draft v0.1 — for review before any code is written
-**Working name:** _TBD_ (see Open Decisions)
+**Status:** Accepted. This is the original specification the project was built
+from, kept as written.
+**Name:** Inside Man
+
+The seven open decisions in section 11 have all been settled. Each one now has
+an accepted record under [decisions/](decisions/), and a few of them landed
+differently from the leaning stated here. The [README](../README.md) describes
+what actually got built.
 
 ---
 
