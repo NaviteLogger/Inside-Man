@@ -11,8 +11,17 @@ data. Treat a violation as a bug.
 | Signal | Where identity lives | Set by |
 |---|---|---|
 | Traces | `service.name` resource attribute | OTel SDK or auto-injected agent |
-| Metrics | `service` label on `traces_spanmetrics_*` | Alloy `spanMetrics` connector |
+| Metrics | `service_name` label on `traces_spanmetrics_*` | Alloy `spanMetrics` connector |
 | Logs | `service_name` index label | Loki's OTLP attribute promotion |
+
+Metrics and logs use the identical label name, `service_name`, so a pivot is a
+straight substitution with nothing to translate.
+
+Design doc section 4.4 wrote these queries with a `service` label, which is
+Tempo's metrics-generator convention. Generating span metrics in Alloy instead
+([ADR 0011](decisions/0011-otlp-pod-logs.md) covers the related log path) gives
+`service_name`, because the connector derives labels from OTLP resource
+attributes with dots turned into underscores.
 
 Grouping and topology come from `service.namespace` plus `k8s.namespace.name`,
 `k8s.deployment.name` and `k8s.pod.name`, which Alloy's `k8sattributes`
@@ -48,21 +57,43 @@ underscores: `service.name` becomes `service_name`, `k8s.namespace.name` becomes
 metadata.
 
 That is why pod logs ship over OTLP (`podLogsViaOpenTelemetry`) in place of
-Loki's native push API. Logs carry the same identity traces do, and "logs for
-this trace" becomes a structured-metadata filter over a regex on the log line.
+Loki's native push API. Logs carry the same identity traces do, with nothing to
+maintain.
+
+One caveat, verified on a live cluster. Loki puts an OTLP log record's TraceId
+field into structured metadata, but Alloy collects container stdout, so the
+record's body is the raw log line and that field is never populated. A
+`trace_id` printed by an application therefore lives in the body text, and
+"logs for this trace" is a line filter or a query-time JSON parse. Both work and
+both are shown below.
 
 ## Querying across the join
 
+All of these are run against the demo app in `make e2e`.
+
 ```promql
-# RED metrics for a service
-sum by (service) (rate(traces_spanmetrics_calls_total{service="checkout"}[5m]))
+# Request rate
+sum by (service_name) (rate(traces_spanmetrics_calls_total[5m]))
+
+# Error ratio
+  sum by (service_name) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+/ sum by (service_name) (rate(traces_spanmetrics_calls_total[5m]))
+
+# p95 latency. Note duration_seconds, where Tempo's generator emits latency.
+histogram_quantile(0.95, sum by (service_name, le) (rate(traces_spanmetrics_duration_seconds_bucket[5m])))
+
+# Dependencies
+sum by (client, server) (rate(traces_service_graph_request_total[5m]))
 ```
 ```logql
 # That service's logs
 {service_name="checkout"}
 
-# That request's logs, via structured metadata
-{service_name="checkout"} | trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
+# That request's logs, everywhere it went
+{k8s_namespace_name="demo"} |= "4bf92f3577b34da6a3ce929d0e0e4736"
+
+# Same thing, parsed, when the log line is JSON
+{service_name="checkout"} | json | trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
 ```
 ```traceql
 # That service's failing traces

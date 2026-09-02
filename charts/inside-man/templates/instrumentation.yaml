@@ -1,0 +1,54 @@
+{{- if .Values.insideMan.instrumentation.enabled }}
+{{- $inst := .Values.insideMan.instrumentation }}
+{{- $langs := $inst.languages }}
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: {{ include "inside-man.fullname" . }}
+  labels:
+    {{- include "inside-man.labels" . | nindent 4 }}
+  annotations:
+    # The Instrumentation CR has to exist before any annotated pod starts, and
+    # the operator's webhook has to be serving. Both are true by the time the
+    # post-install hook weight runs.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  exporter:
+    # The OTLP gateway that k8s-monitoring's applicationObservability runs.
+    endpoint: http://{{ .Release.Name }}-receiver.{{ .Release.Namespace }}.svc:4318
+
+  propagators:
+    - tracecontext
+    - baggage
+
+  sampler:
+    type: {{ $inst.samplerType }}
+    argument: {{ $inst.samplerArg | quote }}
+
+  resource:
+    resourceAttributes:
+      k8s.cluster.name: {{ .Values.insideMan.clusterName }}
+
+  # Agent images are pinned here. Left to the operator's compiled-in
+  # defaults, an operator bump would silently change the agent version
+  # inside every application pod in the cluster.
+  # Versions match opentelemetry-operator v0.158.0 versions.txt.
+  {{- if has "java" $langs }}
+  java:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-java:2.30.0
+  {{- end }}
+  {{- if has "nodejs" $langs }}
+  nodejs:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:0.78.0
+  {{- end }}
+  {{- if has "python" $langs }}
+  python:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:0.64b0
+  {{- end }}
+  {{- if has "dotnet" $langs }}
+  dotnet:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:1.16.0
+  {{- end }}
+{{- end }}
