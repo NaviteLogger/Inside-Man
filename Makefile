@@ -1,7 +1,7 @@
-# Inside Man — single entry point for local development.
+# Inside Man development entry point.
 #
-# Every target runs against the pinned toolchain in .tools/bin; nothing depends
-# on what happens to be installed system-wide.
+# Every target uses the pinned toolchain in .tools/bin, so nothing depends on
+# what happens to be installed system-wide.
 
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end verification against a live cluster.
 #
-# Assumes `make up` has already installed the chart — `make e2e` depends on it.
+# Assumes the chart is already installed, which `make e2e` handles.
 # Assertions are grouped by the milestone whose "done" definition they encode,
-# so each milestone adds a block here rather than inventing its own harness.
+# so each milestone adds a block here and reuses this harness.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,7 +13,7 @@ export KUBECONFIG="${REPO_ROOT}/kubeconfig"
 NAMESPACE="${NAMESPACE:-inside-man}"
 RELEASE="${RELEASE:-inside-man}"
 
-# Budget from design doc §12: the small profile must fit in < 4 CPU / 8 GiB.
+# Design doc 12: the small profile has to fit in 4 CPU and 8 GiB.
 BUDGET_CPU_MILLI=4000
 BUDGET_MEM_MIB=8192
 
@@ -22,8 +22,8 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; pass=$((pass+1)); }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; fail=$((fail+1)); }
 group(){ printf '\n\033[1m%s\033[0m\n' "$*"; }
 
-# ── M0: the bundle installs ───────────────────────────────────────────────────
-group "M0 — the chart installs and comes up"
+# M0: the bundle installs.
+group "M0: the chart installs and comes up"
 
 status="$(helm status "${RELEASE}" -n "${NAMESPACE}" -o json 2>/dev/null \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["status"])' 2>/dev/null || echo "missing")"
@@ -31,7 +31,7 @@ status="$(helm status "${RELEASE}" -n "${NAMESPACE}" -o json 2>/dev/null \
   && ok "helm release ${RELEASE} is deployed" \
   || bad "helm release ${RELEASE} status is '${status}', expected 'deployed'"
 
-# Wait rather than sample once — pods legitimately take time to settle.
+# Wait for readiness, since pods take time to settle.
 if kubectl wait --for=condition=Ready pods --all -n "${NAMESPACE}" --timeout=10m >/dev/null 2>&1; then
   ok "all pods in ${NAMESPACE} reached Ready"
 else
@@ -39,7 +39,7 @@ else
   kubectl get pods -n "${NAMESPACE}" --no-headers | awk '$2!~/^([0-9]+)\/\1$/ {print "      " $0}'
 fi
 
-# A pod that is Ready but restarting is still a failure worth surfacing.
+# A pod can be Ready and still be crash-looping.
 restarts="$(kubectl get pods -n "${NAMESPACE}" -o json | python3 -c '
 import json, sys
 noisy = []
@@ -54,7 +54,7 @@ print(",".join(noisy))
   && ok "no container has restarted more than twice" \
   || bad "containers restarting: ${restarts}"
 
-group "M0 — footprint stays within the design doc §12 budget"
+group "M0: footprint stays within budget"
 read -r cpu mem <<<"$(kubectl get pods -n "${NAMESPACE}" -o json | python3 -c '
 import json,sys
 def cpu(v):
@@ -78,9 +78,8 @@ print(c, round(m))')"
   && ok "memory requests ${mem}Mi < ${BUDGET_MEM_MIB}Mi" \
   || bad "memory requests ${mem}Mi exceeds ${BUDGET_MEM_MIB}Mi"
 
-# ── M1+: telemetry actually flows. Added as each milestone lands. ─────────────
-# M1 asserts: span metrics exist per demo service; logs exist under the matching
-# service_name label; a trace_id lifted from a log resolves in Tempo; active
+# M1 adds: span metrics exist per demo service, logs exist under the matching
+# service_name label, a trace_id taken from a log resolves in Tempo, and active
 # series stay under the cardinality budget.
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "${pass}" "${fail}"

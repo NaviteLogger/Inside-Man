@@ -1,70 +1,51 @@
-# Inside Man — default values (the "small" profile).
-#
-# Keep this surface small. Anything a platform engineer should not need to think
-# about belongs in the sub-chart defaults, not here.
-#
-# For the HA profile, install with `-f values-ha.yaml`.
+# Default values for Inside Man. This is the "small" profile.
+# For HA, install with -f values-ha.yaml.
 
-# ── Inside Man's own knobs ────────────────────────────────────────────────────
 insideMan:
-  # Cluster name stamped onto every signal. Shows up as a label everywhere.
   clusterName: inside-man
 
-  # Health thresholds (design doc §5.2). Deliberately dumb in v1 — no anomaly
-  # detection. Overridable per service via the insideman.io/slo-p95 annotation.
+  # Health thresholds (design doc 5.2). Override per service with the
+  # insideman.io/slo-p95 annotation.
   health:
     errorRateWarn: 0.01
     errorRateCrit: 0.05
     p95WarnSeconds: 0.5
 
-  # Languages to auto-instrument via the OpenTelemetry Operator.
-  # Go is deliberately absent: its operator path needs a privileged eBPF
-  # sidecar, cannot handle multi-container pods, and upstream has moved to OBI.
-  # See docs/decisions/0007-demo-app-languages.md.
   instrumentation:
     enabled: true
+    # Go is excluded, see docs/decisions/0007-demo-app-languages.md
     languages: [java, nodejs, python, dotnet]
-    # Sampling: 100% in the small profile — these are dev/small clusters.
     samplerType: parentbased_traceidratio
     samplerArg: "1.0"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-# Off by default so `helm install` gives a working stack with no IdP. Turn on
-# for anything shared. Documented in docs/auth.md.
+# Off by default so a fresh install works without an identity provider.
 oauth2-proxy:
   enabled: false
 
-# ── Ingest: Alloy, via Grafana's k8s-monitoring chart ─────────────────────────
-# This one chart replaces both a hand-written Alloy config and a separate OTel
-# Collector deployment. See docs/decisions/0003-use-k8s-monitoring-chart.md.
+# Ingest. See docs/decisions/0003-use-k8s-monitoring-chart.md for why this
+# chart replaces a hand-written Alloy config and a separate OTel Collector.
 k8s-monitoring:
   enabled: true
 
   cluster:
     name: inside-man
 
-  # Usage telemetry aimed at Grafana Cloud. Off — this is a self-hosted product.
+  # Defaults to on and reports usage to Grafana Cloud.
   selfReporting:
     enabled: false
 
-  # v4 requires explicitly named Alloy instances, and every feature names the
-  # collector it runs on. Three, because they have genuinely different shapes:
-  #  - cluster-wide scraping must be a singleton or metrics double-count
-  #  - pod log tailing must be a DaemonSet to reach each node's filesystem
-  #  - the OTLP gateway is a plain scalable Deployment
-  # On the single-node dev cluster the DaemonSet is one pod anyway.
+  # v4 requires named Alloy instances, and each feature picks one. Three,
+  # because they have different shapes: cluster-wide scraping has to be a
+  # singleton or metrics double-count, log tailing has to be a DaemonSet to
+  # reach each node's filesystem, and the OTLP gateway is a plain Deployment.
   collectors:
     singleton:
       presets: [singleton, small]
     logs:
       presets: [daemonset, filesystem-log-reader, host-storage, small]
       alloy:
-        # Required by podLogsViaOpenTelemetry, which uses
-        # otelcol.receiver.filelog — public-preview in Alloy, though the
-        # underlying OTel filelog receiver is long-standing. Accepted
-        # deliberately: the OTLP log path is what makes Loki auto-promote
-        # service.name to the service_name label, which is the whole join key.
-        # See docs/decisions/0011-otlp-pod-logs.md.
+        # podLogsViaOpenTelemetry uses otelcol.receiver.filelog, which Alloy
+        # classes as public-preview. See docs/decisions/0011-otlp-pod-logs.md.
         stabilityLevel: public-preview
     receiver:
       presets: [deployment, small]
@@ -76,12 +57,10 @@ k8s-monitoring:
       auth: { type: none }
 
     logs:
-      # OTLP rather than the Loki-native push API, deliberately: Loki 3.x
-      # auto-promotes OTLP resource attributes to index labels, so
-      # service.name lands as service_name — matching the label traces carry —
-      # and trace_id lands as structured metadata. That gives us the design
-      # doc's §4.3 join key with no mapping table and no regex.
-      # See docs/join-key.md.
+      # OTLP, in place of Loki's native push API. Loki promotes OTLP resource
+      # attributes to index labels, so service.name arrives as service_name
+      # and matches what traces carry, and trace_id arrives as structured
+      # metadata. That is the join key, for free. See docs/join-key.md.
       type: otlp
       url: http://inside-man-loki-gateway.inside-man.svc:80/otlp
       protocol: http
@@ -100,8 +79,6 @@ k8s-monitoring:
       logs: { enabled: false }
       traces: { enabled: true }
       processors:
-        # Service-graph edges generated here rather than in Tempo, so they
-        # survive a Tempo 2.x→3.0 migration untouched.
         serviceGraphMetrics:
           enabled: true
           dimensions:
@@ -109,7 +86,6 @@ k8s-monitoring:
             - k8s.namespace.name
             - k8s.cluster.name
 
-  # Infrastructure metrics
   clusterMetrics:
     enabled: true
     collector: singleton
@@ -120,12 +96,10 @@ k8s-monitoring:
     enabled: true
     collector: singleton
 
-  # Pod logs over OTLP — see the `logs` destination comment above.
   podLogsViaOpenTelemetry:
     enabled: true
     collector: logs
 
-  # Application telemetry: the OTLP gateway our auto-instrumented apps ship to.
   applicationObservability:
     enabled: true
     collector: receiver
@@ -135,20 +109,18 @@ k8s-monitoring:
         http: { enabled: true, port: 4318 }
     processors:
       k8sattributes:
-        # NOTE: deliberately left off. A contrib regression (#47534) broke
-        # resource.opentelemetry.io/service.name precedence over
-        # app.kubernetes.io/name when this is on. Re-evaluate before enabling.
+        # Off until collector-contrib #47534 is confirmed fixed. That
+        # regression broke resource.opentelemetry.io/service.name taking
+        # precedence over app.kubernetes.io/name.
         otelAnnotations: false
     connectors:
       spanMetrics:
         enabled: true
-        # Must be set explicitly. The Alloy default namespace would emit
-        # traces_span_metrics_* while Tempo's generator emits
-        # traces_spanmetrics_* — pinning it keeps BFF queries and dashboards
-        # portable across both generation strategies.
+        # Set explicitly. Alloy's default namespace produces
+        # traces_span_metrics_* while Tempo's generator produces
+        # traces_spanmetrics_*, and queries need one name.
         namespace: traces.spanmetrics
-        # Cardinality budget (design doc §10's top risk). Anything beyond the
-        # four intrinsic dimensions plus these is banned.
+        # Cardinality budget, see docs/join-key.md.
         aggregationCardinalityLimit: 1000
         dimensions:
           - name: service.namespace
@@ -159,15 +131,14 @@ k8s-monitoring:
           type: explicit
           unit: s
 
-  # We deploy kube-state-metrics and node-exporter here, not via the Prometheus
-  # chart — this chart is the one that scrapes them.
+  # This chart scrapes them, so it deploys them. The Prometheus chart's own
+  # copies are disabled below.
   telemetryServices:
     kube-state-metrics:
       deploy: true
     node-exporter:
       deploy: true
 
-# ── Auto-instrumentation ──────────────────────────────────────────────────────
 opentelemetry-operator:
   enabled: true
   manager:
@@ -175,20 +146,20 @@ opentelemetry-operator:
       repository: otel/opentelemetry-collector-k8s
   admissionWebhooks:
     certManager:
-      # Use the operator's self-signed cert generator rather than requiring
-      # cert-manager as a prerequisite. One less thing to install.
+      # Avoids making cert-manager a prerequisite.
       enabled: false
     autoGenerateCert:
       enabled: true
 
-# ── Metrics store: Prometheus (small profile default) ─────────────────────────
+# Metrics. Prometheus for small, Mimir for HA.
+# See docs/decisions/0002-prometheus-default-mimir-for-ha.md.
 prometheus:
   enabled: true
   server:
     fullnameOverride: inside-man-prometheus
     retention: 15d
     extraArgs:
-      # Required — this is how Alloy's `prometheus` destination writes to us.
+      # How Alloy's prometheus destination writes to us.
       web.enable-remote-write-receiver: null
     persistentVolume:
       enabled: true
@@ -196,8 +167,7 @@ prometheus:
     resources:
       requests: { cpu: 200m, memory: 512Mi }
       limits: { memory: 2Gi }
-  # Deployed by k8s-monitoring instead — enabling them here would duplicate
-  # both the workloads and the metrics they produce.
+  # k8s-monitoring deploys these.
   kube-state-metrics:
     enabled: false
   prometheus-node-exporter:
@@ -207,11 +177,10 @@ prometheus:
   alertmanager:
     enabled: true
 
-# Mimir is the HA-profile metrics store. See values-ha.yaml.
 mimir-distributed:
   enabled: false
 
-# ── Log store: Loki, monolithic ───────────────────────────────────────────────
+# Logs.
 loki:
   enabled: true
   fullnameOverride: inside-man-loki
@@ -232,10 +201,10 @@ loki:
             prefix: loki_index_
             period: 24h
     limits_config:
-      # Required for trace_id to be queryable as structured metadata.
+      # Needed to query trace_id as structured metadata.
       allow_structured_metadata: true
       volume_enabled: true
-      retention_period: 336h  # 14d, per design doc §7
+      retention_period: 336h
   singleBinary:
     replicas: 1
     persistence:
@@ -244,8 +213,7 @@ loki:
     resources:
       requests: { cpu: 200m, memory: 512Mi }
       limits: { memory: 2Gi }
-  # Memcached tiers default on and ask for 8 GiB of heap between them — far past
-  # the design doc's "< 4 CPU / 8 GiB" budget for a small cluster.
+  # Both memcached tiers default on and ask for 8Gi of heap between them.
   chunksCache:
     enabled: false
   resultsCache:
@@ -254,20 +222,19 @@ loki:
     enabled: false
   test:
     enabled: false
-  # Zero out the microservices topology so Monolithic mode is unambiguous.
   backend: { replicas: 0 }
   read: { replicas: 0 }
   write: { replicas: 0 }
 
-# ── Trace store: Tempo, monolithic ────────────────────────────────────────────
+# Traces.
 tempo:
   enabled: true
   fullnameOverride: inside-man-tempo
   tempo:
     reportingEnabled: false
-    retention: 168h  # 7d, per design doc §7
-    # Left off on purpose: span metrics and service-graph edges are generated
-    # client-side in Alloy. Enabling this too would double-count every metric.
+    retention: 168h
+    # Alloy generates span metrics and service graph edges. Enabling this
+    # too would double-count every metric.
     metricsGenerator:
       enabled: false
     receivers:
@@ -284,17 +251,14 @@ tempo:
     enabled: true
     size: 20Gi
 
-# tempo-distributed is the HA-profile trace store. It requires an external
-# Kafka broker and object storage as of Tempo 3.0. See values-ha.yaml.
+# Never enable this alongside tempo. Both charts define a tempo.labels helper
+# and the two collide at render time.
 tempo-distributed:
   enabled: false
 
-# ── Grafana ───────────────────────────────────────────────────────────────────
 grafana:
   enabled: true
   fullnameOverride: inside-man-grafana
-  # Inside Man is the front door; Grafana is one click away for raw
-  # PromQL/LogQL/TraceQL and for the bundled Drilldown apps.
   adminUser: admin
   service:
     type: NodePort
@@ -305,8 +269,7 @@ grafana:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }
-  # The sidecar would add a container per pod to watch for labelled ConfigMaps.
-  # We provision from this chart instead, so it earns nothing.
+  # We provision from this chart, so the sidecar has nothing to watch for.
   sidecar:
     dashboards: { enabled: false }
     datasources: { enabled: false }

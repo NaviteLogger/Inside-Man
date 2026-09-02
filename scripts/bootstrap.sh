@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Install the pinned toolchain into .tools/bin. Idempotent: re-running is a no-op
-# once each tool reports its pinned version.
-#
-# Versions are pinned deliberately — see docs/decisions/. Bump them here and
-# nowhere else.
+# Installs the pinned toolchain into .tools/bin.
+# Re-running is a no-op once each tool reports its pinned version.
+# Bump versions here and nowhere else.
 set -euo pipefail
 
 KUBECTL_VERSION="v1.37.0"
@@ -77,8 +75,8 @@ else
 fi
 
 # --- go ----------------------------------------------------------------------
-# Installed as a toolchain under .tools/go with a shim on PATH, so it cannot
-# collide with any system Go.
+# Unpacked under .tools/go with a shim on PATH so it cannot collide with a
+# system Go install.
 if [[ "$("${BIN_DIR}/go" version 2>/dev/null | grep -o "go${GO_VERSION}" || true)" ]]; then
   skip go
 else
@@ -105,8 +103,8 @@ sys.exit(1)
 fi
 
 # --- gitleaks ----------------------------------------------------------------
-# The devcontainer declares GITLEAKS_VERSION as a build arg but does not put the
-# binary on PATH, so we install it here.
+# The devcontainer declares GITLEAKS_VERSION as a build arg without putting the
+# binary on PATH.
 if [[ "$("${BIN_DIR}/gitleaks" version 2>/dev/null | grep -o "${GITLEAKS_VERSION}" || true)" ]]; then
   skip gitleaks
 else
@@ -122,8 +120,8 @@ else
 fi
 
 # --- git hooks ---------------------------------------------------------------
-# Wire the secret-scanning pre-commit hook. The repo ships a live-looking token
-# in .env for the devcontainer's gh auth, so this is not theoretical.
+# The workspace .env holds a real GitHub token for the devcontainer's gh auth,
+# so the secret-scanning hook matters here.
 if [[ -d "${REPO_ROOT}/.git" ]]; then
   install -m 0755 "${REPO_ROOT}/scripts/pre-commit" "${REPO_ROOT}/.git/hooks/pre-commit"
 fi

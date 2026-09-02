@@ -17,8 +17,8 @@ coverage/
 *.log
 
 # --- helm --------------------------------------------------------------------
-# NOTE: charts/inside-man/charts/*.tgz are vendored ON PURPOSE (see
-# docs/decisions/0009-grafana-helm-chart-repo-split.md). Do not ignore them.
+# charts/inside-man/charts/*.tgz are vendored, see
+# docs/decisions/0009-grafana-helm-chart-repo-split.md
 charts/**/*.lock.bak
 
 # --- local tooling -----------------------------------------------------------

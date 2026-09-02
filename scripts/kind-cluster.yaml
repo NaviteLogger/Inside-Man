@@ -1,16 +1,15 @@
 # Single-node kind cluster for local development and e2e.
 #
-# Single-node is deliberate: this devcontainer runs with
-# fs.inotify.max_user_instances=128 and a read-only /proc/sys, so we cannot
-# raise the limit that multi-node kind clusters exhaust. See
-# docs/decisions/0010-single-node-kind.md.
+# One node, because this devcontainer runs with
+# fs.inotify.max_user_instances=128 and a read-only /proc/sys, and multi-node
+# kind clusters exhaust that limit. See docs/decisions/0010-single-node-kind.md.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: inside-man
 nodes:
   - role: control-plane
     kubeadmConfigPatches:
-      # Label the node so ingress-nginx (or any future ingress) can schedule.
+      # Lets an ingress controller schedule here later.
       - |
         kind: InitConfiguration
         nodeRegistration:

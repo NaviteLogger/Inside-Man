@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # gitleaks needs history to scan commits
+          fetch-depth: 0   # gitleaks scans commit history
       - run: make secrets
 
   chart:
@@ -28,12 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: make lint
-      # Both profiles must render, or the HA path rots unnoticed.
+      # Render both profiles, otherwise the HA path rots unnoticed.
       - name: Render default (small) profile
         run: make template
-      # The ha profile requires external Kafka and object storage, which we
-      # deliberately leave blank in values-ha.yaml so a real install fails loudly.
-      # CI supplies placeholders purely to prove the templates render.
+      # values-ha.yaml leaves Kafka and object storage blank so a real install
+      # fails with a clear message. CI passes placeholders to check rendering.
       - name: Render ha profile
         run: |
           export PATH="$PWD/.tools/bin:$PATH"
@@ -50,8 +49,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One version behind latest is the default, since upstream charts lag;
-        # latest is tested too so breakage is caught before users hit it.
+        # One version behind latest is the default, since upstream charts lag.
+        # Latest is tested too, to catch breakage before users do.
         k8s: ["v1.36.4", "v1.37.0"]
     steps:
       - uses: actions/checkout@v5

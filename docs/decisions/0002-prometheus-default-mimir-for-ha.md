@@ -5,26 +5,25 @@
 
 ## Context
 
-Design doc §6 chose Mimir as the default metrics store with single-node
-Prometheus as a "small" profile. Doc §12 also requires the small profile to fit
-in under 4 CPU / 8 GiB and to reach a live services screen in under 15 minutes.
+Design doc 6 chose Mimir as the default metrics store with single-node
+Prometheus as a small profile. Design doc 12 also requires the small profile to
+fit in 4 CPU and 8 GiB and to reach a live services screen within 15 minutes.
 
-Mimir-distributed is many components and expects object storage. Those two
-goals are in tension.
+Mimir-distributed is many components and expects object storage, so those two
+goals pull against each other.
 
 ## Decision
 
-Prometheus is the default and the `small` profile. Mimir is the `ha` profile.
+Prometheus is the default and the small profile. Mimir is the HA profile.
 
 Prometheus started with `--web.enable-remote-write-receiver` accepts Alloy's
-`prometheus` destination type unchanged, so switching profiles is one values
-key with no code change anywhere.
+`prometheus` destination type unchanged, so switching profiles is one values key
+with no code change.
 
 ## Consequences
 
-- Measured footprint of the default install is 1050m CPU / 2.37 GiB of requests,
-  comfortably inside the budget.
-- Single-node Prometheus is a single point of failure and has no long-term
-  retention story. That is the correct trade for the target audience — one
-  project, one cluster — and `values-ha.yaml` exists for anyone who outgrows it.
-- Both profiles must stay covered by CI rendering, or the HA path will rot.
+- The default install measures 1050m CPU and 2.37 GiB of requests.
+- Single-node Prometheus is a single point of failure with no long-term
+  retention. That suits one project on one cluster, and `values-ha.yaml` exists
+  for anyone who outgrows it.
+- CI renders both profiles, otherwise the HA path rots.

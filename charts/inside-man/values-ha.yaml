@@ -1,26 +1,22 @@
-# Inside Man — HA profile.
+# HA profile.
 #
 #   helm install inside-man charts/inside-man -f charts/inside-man/values-ha.yaml
 #
-# ⚠ Prerequisites this profile does NOT install for you:
+# This profile does not install two things it needs:
 #
-#   1. Object storage (S3/GCS) for Mimir and Tempo. Tempo 3.0 removed the MinIO
-#      subchart, so there is no bundled option any more.
-#   2. A Kafka-compatible broker. Tempo 3.0's microservices mode routes writes
-#      through Kafka — the distributor produces to it, and block-builder,
+#   1. Object storage (S3 or GCS) for Mimir, Tempo and Loki. Tempo 3.0 dropped
+#      the bundled MinIO subchart, so there is no built-in option.
+#   2. A Kafka broker. Tempo 3.0 routes writes through Kafka, and block-builder,
 #      live-store and metrics-generator all consume from it.
 #
-# Without both, this profile will not come up. The small profile has neither
-# requirement, which is why it is the default.
+# Both are left blank below, so an install fails with a clear message and never
+# comes up half-working.
 
-# ── Metrics: Mimir replaces Prometheus ────────────────────────────────────────
 prometheus:
   enabled: false
 
 mimir-distributed:
   enabled: true
-  # Point at your object storage. Left blank on purpose — an install should
-  # fail loudly rather than quietly write somewhere useless.
   mimir:
     structuredConfig:
       common:
@@ -28,15 +24,11 @@ mimir-distributed:
           backend: s3
           s3: {}
 
-# ── Traces: tempo-distributed replaces monolithic Tempo ───────────────────────
 tempo:
   enabled: false
 
 tempo-distributed:
   enabled: true
-  # REQUIRED. Tempo 3.0's block-builder and live-store consume from Kafka and
-  # will not start without it. Left empty deliberately: the chart fails the
-  # render with a clear message rather than installing something broken.
   ingest:
     kafka:
       address: ""
@@ -45,7 +37,6 @@ tempo-distributed:
       backend: s3
       s3: {}
 
-# ── Ingest sized up ───────────────────────────────────────────────────────────
 k8s-monitoring:
   collectors:
     singleton:
@@ -55,8 +46,7 @@ k8s-monitoring:
       alloy:
         stabilityLevel: public-preview
     receiver:
-      # Clustered so the OTLP gateway scales horizontally instead of being a
-      # single choke point.
+      # Clustered so the OTLP gateway scales out under load.
       presets: [deployment, clustered, medium]
 
   destinations:
@@ -65,12 +55,9 @@ k8s-monitoring:
     traces:
       url: inside-man-tempo-distributor.inside-man.svc:4317
 
-# ── Longer retention ──────────────────────────────────────────────────────────
 loki:
   loki:
-    # Monolithic Loki above 1 replica requires object storage — the chart
-    # enforces this. Bucket names are left empty on purpose so a real install
-    # fails loudly rather than writing nowhere useful.
+    # Monolithic Loki above one replica requires object storage.
     storage:
       type: s3
       bucketNames:
@@ -86,10 +73,10 @@ loki:
             prefix: loki_index_
             period: 24h
     limits_config:
-      retention_period: 720h  # 30d
+      retention_period: 720h
   singleBinary:
     replicas: 3
-  # Caches are worth their memory at this size, unlike in the small profile.
+  # Worth the memory at this size.
   chunksCache:
     enabled: true
   resultsCache:

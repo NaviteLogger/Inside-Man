@@ -13,16 +13,15 @@ the container.
 
 ## Decision
 
-`scripts/kind-cluster.yaml` defines one control-plane node and nothing else.
+`scripts/kind-cluster.yaml` defines one control-plane node.
 
 ## Consequences
 
-- Cannot exercise anything genuinely multi-node: scheduling spread, DaemonSet
-  behaviour across nodes, node-failure scenarios. Acceptable — the product
-  targets one install per project cluster, and the DaemonSet path is still
-  exercised with one instance.
-- Resource requests must fit one node. The measured 1050m CPU / 2.37 GiB does,
-  with room to spare.
+- Nothing genuinely multi-node gets exercised: scheduling spread, DaemonSet
+  behaviour across nodes, node-failure scenarios. The product targets one
+  install per project cluster, and the DaemonSet path still runs with one
+  instance.
+- Resource requests have to fit one node. The measured 1050m CPU and 2.37 GiB
+  fits with room to spare.
 - If inotify exhaustion appears anyway, the fix is raising the sysctl on the
-  Docker-in-Docker host via the devcontainer feature, which needs a container
-  rebuild.
+  Docker-in-Docker host via the devcontainer feature, which needs a rebuild.
