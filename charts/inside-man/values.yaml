@@ -57,7 +57,7 @@ k8s-monitoring:
       auth: { type: none }
 
     logs:
-      # OTLP, in place of Loki's native push API. Loki promotes OTLP resource
+      # OTLP, where Loki's native push API would need more work. Loki promotes
       # attributes to index labels, so service.name arrives as service_name
       # and matches what traces carry, and trace_id arrives as structured
       # metadata. That is the join key, for free. See docs/join-key.md.
@@ -150,6 +150,11 @@ opentelemetry-operator:
       enabled: false
     autoGenerateCert:
       enabled: true
+      # Defaults to true, which mints a new webhook cert on every helm upgrade
+      # while the running operator pod keeps serving the old one. Any upgrade
+      # that touches the Instrumentation CR then fails its webhook call with
+      # "certificate signed by unknown authority".
+      recreate: false
 
 # Metrics. Prometheus for small, Mimir for HA.
 # See docs/decisions/0002-prometheus-default-mimir-for-ha.md.
@@ -158,9 +163,15 @@ prometheus:
   server:
     fullnameOverride: inside-man-prometheus
     retention: 15d
-    extraArgs:
+    # extraFlags carries argumentless flags. The chart's extraArgs map cannot
+    # express one: a null value in a values file is a delete instruction to
+    # Helm's coalescing, so the key never reaches the template.
+    # web.enable-lifecycle is the chart default and has to be repeated, since
+    # Helm replaces lists over merging them.
+    extraFlags:
+      - web.enable-lifecycle
       # How Alloy's prometheus destination writes to us.
-      web.enable-remote-write-receiver: null
+      - web.enable-remote-write-receiver
     persistentVolume:
       enabled: true
       size: 20Gi
@@ -273,3 +284,82 @@ grafana:
   sidecar:
     dashboards: { enabled: false }
     datasources: { enabled: false }
+
+  # Datasources and the links between them, provisioned as code. This is what
+  # makes M1's promise true: a trace reaches its logs and its RED metrics with
+  # nobody clicking through Grafana settings.
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://inside-man-prometheus.inside-man.svc:80
+          isDefault: true
+          jsonData:
+            timeInterval: 30s
+
+        - name: Loki
+          uid: loki
+          type: loki
+          access: proxy
+          url: http://inside-man-loki-gateway.inside-man.svc:80
+          jsonData:
+            # Alloy collects container stdout, so a log record's OTLP TraceId
+            # field is never set and Loki has no trace id in structured
+            # metadata. The id an application prints lives in the body, which
+            # is what this pattern picks up. See docs/join-key.md.
+            derivedFields:
+              - name: TraceID
+                matcherType: regex
+                matcherRegex: '"trace_id":\s*"([a-f0-9]{32})"'
+                url: '${__value.raw}'
+                datasourceUid: tempo
+                urlDisplayLabel: View trace
+
+        - name: Tempo
+          uid: tempo
+          type: tempo
+          access: proxy
+          url: http://inside-man-tempo.inside-man.svc:3200
+          jsonData:
+            # Trace to logs. service.name on the span becomes the service_name
+            # label on the log stream, which is the join key doing its job.
+            tracesToLogsV2:
+              datasourceUid: loki
+              spanStartTimeShift: -5m
+              spanEndTimeShift: 5m
+              filterByTraceID: true
+              tags:
+                - key: service.name
+                  value: service_name
+
+            # Trace to RED metrics. The label is service_name, because Alloy
+            # generates these and Tempo's metrics-generator stays off.
+            tracesToMetrics:
+              datasourceUid: prometheus
+              spanStartTimeShift: -5m
+              spanEndTimeShift: 5m
+              tags:
+                - key: service.name
+                  value: service_name
+              queries:
+                - name: Request rate
+                  query: sum by (service_name) (rate(traces_spanmetrics_calls_total{$__tags}[5m]))
+                - name: Error rate
+                  query: sum by (service_name) (rate(traces_spanmetrics_calls_total{$__tags,status_code="STATUS_CODE_ERROR"}[5m]))
+                - name: p95 duration
+                  query: histogram_quantile(0.95, sum by (service_name, le) (rate(traces_spanmetrics_duration_seconds_bucket{$__tags}[5m])))
+
+            serviceMap:
+              datasourceUid: prometheus
+            nodeGraph:
+              enabled: true
+            search:
+              hide: false
+            traceQuery:
+              timeShiftEnabled: true
+              spanStartTimeShift: -5m
+              spanEndTimeShift: 5m

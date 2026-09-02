@@ -1,0 +1,165 @@
+# Demo app: frontend (Node) -> api (Python) -> backend (Java).
+#
+# The only thing enabling observability is the instrumentation.opentelemetry.io
+# annotation on each pod template. No SDK, no config, no code changes. That is
+# the claim M1 has to demonstrate.
+#
+# service.name is left unset, so the operator derives it from the Deployment
+# name. See docs/decisions/0004-service-name-from-workload.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-frontend
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-frontend }
+  template:
+    metadata:
+      labels: { app: demo-frontend }
+      annotations:
+        instrumentation.opentelemetry.io/inject-nodejs: "inside-man/inside-man"
+    spec:
+      containers:
+        - name: frontend
+          image: demo-frontend:local
+          imagePullPolicy: Never
+          ports: [{ containerPort: 8080 }]
+          env:
+            - name: API_URL
+              value: http://demo-api.demo.svc:8080
+            # Lets the app resolve the agent's own @opentelemetry/api so log
+            # lines can carry their trace id. Spans need none of this.
+            - name: NODE_PATH
+              value: /otel-auto-instrumentation-nodejs/node_modules
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-frontend
+  namespace: demo
+spec:
+  selector: { app: demo-frontend }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-api }
+  template:
+    metadata:
+      labels: { app: demo-api }
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "inside-man/inside-man"
+    spec:
+      containers:
+        - name: api
+          image: demo-api:local
+          imagePullPolicy: Never
+          ports: [{ containerPort: 8080 }]
+          env:
+            - name: BACKEND_URL
+              value: http://demo-backend.demo.svc:8080
+            # Makes the agent attach otelTraceID to every stdlib log record.
+            - name: OTEL_PYTHON_LOG_CORRELATION
+              value: "true"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-api
+  namespace: demo
+spec:
+  selector: { app: demo-api }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-backend
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-backend }
+  template:
+    metadata:
+      labels: { app: demo-backend }
+      annotations:
+        instrumentation.opentelemetry.io/inject-java: "inside-man/inside-man"
+    spec:
+      containers:
+        - name: backend
+          image: demo-backend:local
+          imagePullPolicy: Never
+          ports: [{ containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-backend
+  namespace: demo
+spec:
+  selector: { app: demo-backend }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+# Drives continuous traffic so the demo has live RED metrics, with roughly one
+# in five requests taking the failure path.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-loadgen
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: demo-loadgen }
+  template:
+    metadata:
+      labels: { app: demo-loadgen }
+    spec:
+      containers:
+        - name: loadgen
+          image: curlimages/curl:8.19.0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              while true; do
+                i=$((i + 1))
+                if [ $((i % 5)) -eq 0 ]; then
+                  curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"
+                else
+                  curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout"
+                fi
+                sleep 2
+              done
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }

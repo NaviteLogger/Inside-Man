@@ -78,9 +78,218 @@ print(c, round(m))')"
   && ok "memory requests ${mem}Mi < ${BUDGET_MEM_MIB}Mi" \
   || bad "memory requests ${mem}Mi exceeds ${BUDGET_MEM_MIB}Mi"
 
-# M1 adds: span metrics exist per demo service, logs exist under the matching
-# service_name label, a trace_id taken from a log resolves in Tempo, and active
-# series stay under the cardinality budget.
+# M1: telemetry flows and the join key holds.
+DEMO_NS="${DEMO_NS:-demo}"
+# Overridable so the assertions themselves can be negative-tested.
+read -r -a DEMO_SERVICES <<< "${DEMO_SERVICES:-demo-frontend demo-api demo-backend}"
+
+if kubectl get ns "${DEMO_NS}" >/dev/null 2>&1; then
+  group "M1: the demo app produces telemetry"
+
+  kubectl wait --for=condition=Available deploy --all -n "${DEMO_NS}" --timeout=5m >/dev/null 2>&1 \
+    && ok "demo app is running" \
+    || bad "demo app did not become available"
+
+  # Agents come from a pod annotation alone, so the init container is the
+  # evidence that zero-touch instrumentation actually happened.
+  injected="$(kubectl get pods -n "${DEMO_NS}" -o json | python3 -c '
+import json, sys
+found = set()
+for pod in json.load(sys.stdin)["items"]:
+    for c in pod["spec"].get("initContainers") or []:
+        if c["name"].startswith("opentelemetry-auto-instrumentation-"):
+            found.add(c["name"].rsplit("-", 1)[-1])
+print(",".join(sorted(found)))
+')"
+  [[ "${injected}" == "java,nodejs,python" ]] \
+    && ok "agents auto-injected for java, nodejs and python" \
+    || bad "expected java,nodejs,python agents, got '\''${injected}'\''"
+
+  # ---- metrics ----
+  promql() {
+    kubectl exec -n "${NAMESPACE}" deploy/inside-man-prometheus -c prometheus-server -- \
+      wget -qO- "http://localhost:9090/api/v1/query?query=$(python3 -c '
+import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1")" 2>/dev/null
+  }
+
+  # Span metrics need traffic plus a generation interval. Polling beats
+  # sleeping a guessed amount. On a fresh cluster this is the slow part.
+  printf '    waiting for span metrics'
+  for _ in $(seq 1 30); do
+    if [[ -n "$(promql 'count(traces_spanmetrics_calls_total)' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(res[0]["value"][1] if res else "")
+')" ]]; then break; fi
+    printf '.'
+    sleep 10
+  done
+  printf '\n'
+
+  seen="$(promql 'sum by (service_name) (rate(traces_spanmetrics_calls_total[5m]))' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: print(""); raise SystemExit
+print(",".join(sorted(r["metric"].get("service_name", "?") for r in res)))
+')"
+  for svc in "${DEMO_SERVICES[@]}"; do
+    [[ "${seen}" == *"${svc}"* ]] \
+      && ok "span metrics present for ${svc}" \
+      || bad "no span metrics for ${svc} (saw: ${seen:-none})"
+  done
+
+  # The failure path is deliberate, so an error ratio of zero means the demo
+  # is not exercising it and the health model is untested.
+  errs="$(promql 'sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(res[0]["value"][1] if res else "0")
+')"
+  python3 -c "import sys; sys.exit(0 if float('${errs}') > 0 else 1)" 2>/dev/null \
+    && ok "error-path spans are being recorded" \
+    || bad "no error spans recorded, health model is unexercised"
+
+  # Dependencies, which drive the service map in M4.
+  edges="$(promql 'sum by (client, server) (rate(traces_service_graph_request_total[5m]))' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+pairs = []
+for r in res:
+    m = r["metric"]
+    pairs.append(m.get("client", "?") + ">" + m.get("server", "?"))
+print(",".join(sorted(pairs)))
+')"
+  [[ "${edges}" == *"demo-frontend>demo-api"* && "${edges}" == *"demo-api>demo-backend"* ]] \
+    && ok "service graph shows the frontend to api to backend chain" \
+    || bad "service graph missing expected edges (saw: ${edges:-none})"
+
+  # ---- the join key ----
+  group "M1: the join key holds across all three signals"
+
+  loki() {
+    kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s -G \
+      "http://inside-man-loki-gateway.${NAMESPACE}.svc:80/loki/api/v1/query_range" \
+      --data-urlencode "query=$1" \
+      --data-urlencode "start=$(( $(date +%s) - 1800 ))000000000" \
+      --data-urlencode "end=$(date +%s)000000000" \
+      --data-urlencode "limit=${2:-200}" 2>/dev/null
+  }
+
+  log_svcs="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(",".join(sorted({s["stream"].get("service_name", "?") for s in res})))
+')"
+  for svc in "${DEMO_SERVICES[@]}"; do
+    [[ "${log_svcs}" == *"${svc}"* ]] \
+      && ok "logs indexed under service_name=${svc}" \
+      || bad "no logs under service_name=${svc} (saw: ${log_svcs:-none})"
+  done
+
+  # The pivot the whole product rests on: one trace id, logs from every service
+  # it passed through.
+  trace_id="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
+import json, re, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+seen = {}
+for stream in res:
+    svc = stream["stream"].get("service_name", "?")
+    for _, line in stream["values"]:
+        m = re.search(r"\"trace_id\":\s*\"([a-f0-9]{32})\"", line)
+        if m: seen.setdefault(m.group(1), set()).add(svc)
+multi = [t for t, s in seen.items() if len(s) >= 3]
+print(multi[0] if multi else "")
+')"
+  if [[ -n "${trace_id}" ]]; then
+    ok "found a trace id spanning all three services in logs"
+    hit_svcs="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"} |= "'"${trace_id}"'"' 50 | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(",".join(sorted({s["stream"].get("service_name", "?") for s in res})))
+')"
+    [[ "${hit_svcs}" == *"demo-frontend"* && "${hit_svcs}" == *"demo-api"* && "${hit_svcs}" == *"demo-backend"* ]] \
+      && ok "logs for that trace resolve across all three services" \
+      || bad "trace pivot returned only: ${hit_svcs:-none}"
+  else
+    bad "no trace id correlated logs from all three services"
+  fi
+
+  # Correlation is only real if a trace id found in logs resolves to a trace in
+  # Tempo carrying the whole chain. That is the pivot the product is built on.
+  group "M1: trace and logs resolve to each other"
+
+  grafana() {
+    local pw
+    pw="$(kubectl get secret inside-man-grafana -n "${NAMESPACE}" -o jsonpath='{.data.admin-password}' | base64 -d)"
+    kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s -u "admin:${pw}" "$@" 2>/dev/null
+  }
+  GRAF="http://inside-man-grafana.${NAMESPACE}.svc:80"
+
+  # Grafana 13 ships a distroless image with no shell, so its API is reached
+  # from a pod that does have curl.
+  ds="$(grafana "${GRAF}/api/datasources" | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)
+except Exception: res = []
+print(",".join(sorted(d["uid"] for d in res)))
+')"
+  [[ "${ds}" == "loki,prometheus,tempo" ]] \
+    && ok "datasources provisioned: ${ds}" \
+    || bad "expected loki,prometheus,tempo datasources, got '\''${ds}'\''"
+
+  links="$(grafana "${GRAF}/api/datasources/uid/tempo" | python3 -c '
+import json, sys
+try: j = json.load(sys.stdin)["jsonData"]
+except Exception: j = {}
+out = []
+if j.get("tracesToLogsV2", {}).get("datasourceUid") == "loki": out.append("logs")
+if j.get("tracesToMetrics", {}).get("datasourceUid") == "prometheus": out.append("metrics")
+if j.get("serviceMap", {}).get("datasourceUid") == "prometheus": out.append("servicemap")
+print(",".join(out))
+')"
+  [[ "${links}" == "logs,metrics,servicemap" ]] \
+    && ok "trace correlations wired to logs, metrics and service map" \
+    || bad "Tempo correlations incomplete: '\''${links}'\''"
+
+  if [[ -n "${trace_id}" ]]; then
+    chain="$(grafana "${GRAF}/api/datasources/proxy/uid/tempo/api/v2/traces/${trace_id}" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: print(""); raise SystemExit
+d = d.get("trace", d)
+svcs = set()
+for b in d.get("resourceSpans", []):
+    for a in b.get("resource", {}).get("attributes", []):
+        if a["key"] == "service.name":
+            svcs.add(a["value"].get("stringValue"))
+print(",".join(sorted(svcs)))
+')"
+    [[ "${chain}" == "demo-api,demo-backend,demo-frontend" ]] \
+      && ok "that trace resolves in Tempo across all three services" \
+      || bad "trace ${trace_id} in Tempo covers only: ${chain:-nothing}"
+  fi
+
+  group "M1: span metric cardinality stays inside the budget"
+  series="$(promql 'count(traces_spanmetrics_calls_total)' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(res[0]["value"][1] if res else "0")
+')"
+  # A three-service demo has no business producing hundreds of series. A jump
+  # here means a high-cardinality dimension crept into the connector config.
+  (( series < 100 )) \
+    && ok "traces_spanmetrics_calls_total has ${series} series, under 100" \
+    || bad "traces_spanmetrics_calls_total has ${series} series, cardinality budget breached"
+else
+  group "M1: skipped, no ${DEMO_NS} namespace"
+fi
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "${pass}" "${fail}"
 [[ "${fail}" -eq 0 ]]

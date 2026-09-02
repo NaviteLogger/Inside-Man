@@ -68,6 +68,16 @@ secrets: bootstrap ## Scan the working tree and history for leaked secrets
 	@gitleaks dir . --config .gitleaks.toml --no-banner --redact
 	@gitleaks git . --config .gitleaks.toml --no-banner --redact
 
+.PHONY: demo
+demo: up ## Build, load and deploy the demo app onto the cluster
+	@for s in frontend api backend; do \
+		echo "building demo-$$s"; \
+		docker build -q -t demo-$$s:local examples/demo-app/$$s > /dev/null; \
+		kind load docker-image demo-$$s:local --name $(CLUSTER) > /dev/null; \
+	done
+	@kubectl apply -f examples/demo-app/manifests.yaml
+	@kubectl wait --for=condition=Available deploy --all -n demo --timeout=5m
+
 .PHONY: e2e
-e2e: up ## Full end-to-end verification against the live cluster
+e2e: demo ## Full end-to-end verification against the live cluster
 	@bash scripts/e2e.sh
