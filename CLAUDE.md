@@ -23,3 +23,4 @@ which do not bring long-term value, as this could have been done using exiting s
   matters. Check real status directly (`gh run view`, not a piped `gh run watch`)
   before reporting success on anything.
 - Don't use "X, not Y", "do not X, do Y, rather than" grammar structure.
+- Don't include coauthors in commits
