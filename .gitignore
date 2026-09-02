@@ -1,0 +1,28 @@
+# --- secrets -----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+kubeconfig
+kubeconfig-*
+
+# --- build output ------------------------------------------------------------
+bin/
+dist/
+node_modules/
+*.test
+coverage/
+.coverage
+*.log
+
+# --- helm --------------------------------------------------------------------
+# NOTE: charts/inside-man/charts/*.tgz are vendored ON PURPOSE (see
+# docs/decisions/0009-grafana-helm-chart-repo-split.md). Do not ignore them.
+charts/**/*.lock.bak
+
+# --- local tooling -----------------------------------------------------------
+.tools/
+.idea/
+.vscode/
+.DS_Store

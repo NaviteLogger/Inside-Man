@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Refuse commits that contain secrets. Installed by scripts/bootstrap.sh.
+set -euo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+GITLEAKS="${REPO_ROOT}/.tools/bin/gitleaks"
+[[ -x "${GITLEAKS}" ]] || { echo "gitleaks missing — run 'make bootstrap'"; exit 1; }
+exec "${GITLEAKS}" git --staged --config "${REPO_ROOT}/.gitleaks.toml" --no-banner --redact --verbose

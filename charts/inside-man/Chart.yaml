@@ -1,0 +1,78 @@
+apiVersion: v2
+name: inside-man
+description: Service-centric observability for Kubernetes — one install, zero-touch instrumentation.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/jhoareaumarion/Inside-Man
+sources:
+  - https://github.com/jhoareaumarion/Inside-Man
+keywords:
+  - observability
+  - opentelemetry
+  - tracing
+  - logging
+  - metrics
+
+# ── Dependency repositories ───────────────────────────────────────────────────
+# Two different Grafana repos are in play, on purpose.
+#
+#   grafana-community.github.io  →  grafana, loki, tempo, tempo-distributed
+#   grafana.github.io            →  k8s-monitoring, mimir-distributed
+#
+# Grafana Labs stopped hosting the (always community-maintained) grafana/loki/
+# tempo charts. The originals are frozen — `grafana` and `tempo` carry
+# `deprecated: true` since 2026-01-30, and `loki` there silently became the
+# Grafana *Enterprise* Logs chart. Using them installs year-old software, or the
+# wrong product, with no error. The ingest path is still first-party.
+# See docs/decisions/0009-grafana-helm-chart-repo-split.md.
+dependencies:
+  # ingest — still first-party Grafana Labs
+  - name: k8s-monitoring
+    version: 4.5.0
+    repository: https://grafana.github.io/helm-charts
+    condition: k8s-monitoring.enabled
+
+  - name: opentelemetry-operator
+    version: 0.122.0
+    repository: https://open-telemetry.github.io/opentelemetry-helm-charts
+    condition: opentelemetry-operator.enabled
+
+  # metrics — Prometheus for the default/small profile, Mimir for ha
+  - name: prometheus
+    version: 29.27.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+
+  - name: mimir-distributed
+    version: 6.2.0
+    repository: https://grafana.github.io/helm-charts
+    condition: mimir-distributed.enabled
+
+  # logs
+  - name: loki
+    version: 18.11.7
+    repository: https://grafana-community.github.io/helm-charts
+    condition: loki.enabled
+
+  # traces — monolithic for small; distributed (needs Kafka + S3) for ha
+  - name: tempo
+    version: 2.3.0
+    repository: https://grafana-community.github.io/helm-charts
+    condition: tempo.enabled
+
+  - name: tempo-distributed
+    version: 3.5.1
+    repository: https://grafana-community.github.io/helm-charts
+    condition: tempo-distributed.enabled
+
+  # visualisation and auth
+  - name: grafana
+    version: 13.0.1
+    repository: https://grafana-community.github.io/helm-charts
+    condition: grafana.enabled
+
+  - name: oauth2-proxy
+    version: 10.7.0
+    repository: https://oauth2-proxy.github.io/manifests
+    condition: oauth2-proxy.enabled
