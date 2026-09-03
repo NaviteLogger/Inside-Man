@@ -10,7 +10,7 @@ ending up with a half-finished Grafana that engineers avoid. Inside Man is the
 opinionated bundle plus the service-centric layer that Grafana only ships in
 Grafana Cloud.
 
-> Early days. M0 is done and the chart installs cleanly. See [Milestones](#milestones).
+> v1 scope (M0 to M4) is complete. M5 hardening is next. See [Milestones](#milestones).
 
 ## Quick start
 
@@ -35,6 +35,7 @@ make down      # tear it down
 | Loki | upstream | logs |
 | Tempo | upstream | traces |
 | Grafana | upstream, our provisioning | datasources, correlations, dashboards, and the bundled Drilldown apps |
+| Alertmanager | upstream, our rules | baseline alerts mirroring the health model |
 | BFF, UI, umbrella chart | ours | the service-centric layer |
 
 We write as little as possible. Ingest is one upstream chart configured through
@@ -74,7 +75,7 @@ single OIDC login.
 | M1 | The bundle works: trace to logs to RED metrics, zero config | done |
 | M2 | Service list: `/api/services`, UI home screen, diagnostics page | done |
 | M3 | Service detail: pods, dependencies, traces, logs | done |
-| M4 | Service map and issues | |
+| M4 | Service map and issues | done |
 
 Non-goals and the parked backlog are in [docs/v2-backlog.md](docs/v2-backlog.md).
 

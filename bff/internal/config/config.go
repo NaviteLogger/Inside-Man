@@ -15,6 +15,7 @@ type Config struct {
 	PrometheusURL string
 	LokiURL       string
 	TempoURL      string
+	AlertsURL     string
 
 	// Used only to build deep links for the browser, so this has to be an
 	// address the user can reach. A cluster-internal service name will not do.
@@ -45,6 +46,7 @@ func Load() (Config, error) {
 		PrometheusURL: env("PROMETHEUS_URL", "http://inside-man-prometheus.inside-man.svc:80"),
 		LokiURL:       env("LOKI_URL", "http://inside-man-loki-gateway.inside-man.svc:80"),
 		TempoURL:      env("TEMPO_URL", "http://inside-man-tempo.inside-man.svc:3200"),
+		AlertsURL:     env("ALERTMANAGER_URL", "http://inside-man-alertmanager.inside-man.svc:9093"),
 		GrafanaURL:    env("GRAFANA_EXTERNAL_URL", "http://localhost:3000"),
 		SelfNamespace: env("POD_NAMESPACE", "inside-man"),
 	}
