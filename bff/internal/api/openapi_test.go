@@ -10,6 +10,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/NaviteLogger/Inside-Man/bff/internal/alerts"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/health"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/kube"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/logs"
@@ -63,6 +64,17 @@ func TestResponseShapesMatchOpenAPISpec(t *testing.T) {
 		{"LogLine", logs.Line{Timestamp: time.Now(), Pod: "pod-1"}},
 		{"Check", Check{Hint: "do the thing"}},
 		{"DiagnosticsResponse", diagnosticsResponse{Checks: []Check{{}}, CheckedAt: "now"}},
+		{"MapNode", MapNode{Namespace: "shop", Health: health.Result{Status: health.Healthy}}},
+		{"MapResponse", mapResponse{
+			Nodes: []MapNode{{}}, Edges: []promql.Edge{}, Window: "5m",
+		}},
+		{"Alert", alerts.Alert{
+			Namespace: "shop", Summary: "s", Description: "d",
+			StartsAt: time.Now(), Labels: map[string]string{"a": "b"},
+		}},
+		{"AlertsResponse", alertsResponse{
+			Alerts: []alerts.Alert{}, ByService: map[string][]alerts.Alert{},
+		}},
 		{"ServiceDetail", ServiceDetail{
 			Health:      health.Result{Status: health.Healthy},
 			Workload:    &kube.Workload{},

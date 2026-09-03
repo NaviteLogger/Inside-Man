@@ -1,0 +1,95 @@
+{{- if .Values.insideMan.alerts.enabled }}
+{{- $h := .Values.insideMan.health }}
+# Baseline alert rules, mounted into Prometheus by the ruleFiles values below.
+#
+# They mirror the health model in design doc 5.2, so an alert and a red badge
+# on the services list carry the same meaning. The service_name label
+# is the join key, which is what lets the Issues screen group by service and
+# what the BFF folds back into health.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "inside-man.fullname" . }}-alert-rules
+  labels:
+    {{- include "inside-man.labels" . | nindent 4 }}
+data:
+  inside-man.rules: |
+    groups:
+      - name: inside-man.services
+        rules:
+          - alert: ServiceErrorRateCritical
+            expr: |
+              (
+                sum by (service_name, k8s_namespace_name) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+                /
+                sum by (service_name, k8s_namespace_name) (rate(traces_spanmetrics_calls_total[5m]))
+              ) > {{ $h.errorRateCrit }}
+            for: {{ .Values.insideMan.alerts.for.critical }}
+            labels:
+              severity: critical
+            annotations:
+              summary: '{{ "{{ $labels.service_name }}" }} is failing more than {{ mulf $h.errorRateCrit 100 }}% of requests'
+              description: 'Error rate is {{ "{{ $value | humanizePercentage }}" }} over 5m.'
+
+          - alert: ServiceErrorRateWarning
+            expr: |
+              (
+                sum by (service_name, k8s_namespace_name) (rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+                /
+                sum by (service_name, k8s_namespace_name) (rate(traces_spanmetrics_calls_total[5m]))
+              ) > {{ $h.errorRateWarn }}
+            for: {{ .Values.insideMan.alerts.for.warning }}
+            labels:
+              severity: warning
+            annotations:
+              summary: '{{ "{{ $labels.service_name }}" }} is failing more than {{ mulf $h.errorRateWarn 100 }}% of requests'
+              description: 'Error rate is {{ "{{ $value | humanizePercentage }}" }} over 5m.'
+
+          - alert: ServiceLatencyWarning
+            expr: |
+              histogram_quantile(0.95,
+                sum by (service_name, k8s_namespace_name, le) (rate(traces_spanmetrics_duration_seconds_bucket[5m]))
+              ) > {{ $h.p95WarnSeconds }}
+            for: {{ .Values.insideMan.alerts.for.warning }}
+            labels:
+              severity: warning
+            annotations:
+              summary: '{{ "{{ $labels.service_name }}" }} p95 latency is above {{ $h.p95WarnSeconds }}s'
+              description: 'p95 is {{ "{{ $value | humanizeDuration }}" }} over 5m.'
+
+      - name: inside-man.workloads
+        rules:
+          - alert: PodCrashLooping
+            expr: |
+              increase(kube_pod_container_status_restarts_total[15m]) > 3
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: '{{ "{{ $labels.namespace }}/{{ $labels.pod }}" }} is restarting repeatedly'
+              description: '{{ "{{ $value | printf \"%.0f\" }}" }} restarts in the last 15 minutes.'
+
+          - alert: DeploymentReplicasUnavailable
+            expr: |
+              kube_deployment_status_replicas_available < kube_deployment_spec_replicas
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: '{{ "{{ $labels.namespace }}/{{ $labels.deployment }}" }} has unavailable replicas'
+              description: '{{ "{{ $value | printf \"%.0f\" }}" }} of {{ "{{ $labels.deployment }}" }} replicas are available.'
+
+      # The join key breaking is invisible from inside a dashboard, so it gets
+      # an alert of its own. See docs/join-key.md.
+      - name: inside-man.platform
+        rules:
+          - alert: NoSpanMetrics
+            expr: |
+              absent(traces_spanmetrics_calls_total)
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'No service is producing span metrics'
+              description: 'Nothing has reported a span in 15 minutes. Check the diagnostics page.'
+{{- end }}

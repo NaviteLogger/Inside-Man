@@ -149,6 +149,47 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/map:
+    get:
+      summary: The service graph, with each node coloured by health
+      description: |
+        Nodes come from span metrics, so a service with no traffic in the window
+        still appears with unknown health. The graph also names peers that never
+        reported spans of their own, such as a database or Tempo's virtual user
+        node for a request nobody traced.
+      operationId: getMap
+      responses:
+        "200":
+          description: Nodes and edges.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapResponse" }
+        "502":
+          description: An upstream store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/alerts:
+    get:
+      summary: Firing alerts, newest first, grouped by service
+      description: |
+        Silenced and inhibited alerts are left out, since someone suppressed
+        those knowingly. An alert naming no service is grouped under an empty
+        key and shown as cluster-wide.
+      operationId: getAlerts
+      responses:
+        "200":
+          description: Firing alerts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlertsResponse" }
+        "502":
+          description: Alertmanager could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/diagnostics:
     get:
       summary: Whether the join key is intact
@@ -347,6 +388,59 @@ components:
         lines:
           type: array
           items: { $ref: "#/components/schemas/LogLine" }
+
+    MapNode:
+      type: object
+      required: [name, health, requestRate, errorRatio]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        health: { $ref: "#/components/schemas/Health" }
+        requestRate: { type: number }
+        errorRatio: { type: number }
+
+    MapResponse:
+      type: object
+      required: [nodes, edges, window]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/MapNode" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/Edge" }
+        window: { type: string }
+
+    Alert:
+      type: object
+      required: [name, service, severity, startsAt]
+      properties:
+        name: { type: string }
+        service:
+          type: string
+          description: Empty when the alert names no service, meaning cluster-wide.
+        namespace: { type: string }
+        severity: { type: string }
+        summary: { type: string }
+        description: { type: string }
+        startsAt: { type: string, format: date-time }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+
+    AlertsResponse:
+      type: object
+      required: [alerts, byService]
+      properties:
+        alerts:
+          type: array
+          items: { $ref: "#/components/schemas/Alert" }
+        byService:
+          type: object
+          description: The same alerts grouped by service name.
+          additionalProperties:
+            type: array
+            items: { $ref: "#/components/schemas/Alert" }
 
     Check:
       type: object
