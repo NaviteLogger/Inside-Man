@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/NaviteLogger/Inside-Man/bff/internal/alerts"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/config"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/kube"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/logs"
@@ -106,6 +107,7 @@ func newTestServer(t *testing.T) (*Server, *stubProm) {
 	return NewServer(cfg, client,
 		traces.New(prom.URL, 5*time.Second),
 		logs.New(prom.URL, 5*time.Second, "inside-man"),
+		alerts.New(prom.URL, 5*time.Second),
 		cache, slog.New(slog.DiscardHandler)), stub
 }
 

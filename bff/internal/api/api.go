@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NaviteLogger/Inside-Man/bff/internal/alerts"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/config"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/health"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/kube"
@@ -24,17 +25,18 @@ import (
 )
 
 type Server struct {
-	cfg   config.Config
-	prom  *promql.Client
-	tempo *traces.Client
-	loki  *logs.Client
-	cache *kube.Cache
-	log   *slog.Logger
+	cfg    config.Config
+	prom   *promql.Client
+	tempo  *traces.Client
+	loki   *logs.Client
+	alerts *alerts.Client
+	cache  *kube.Cache
+	log    *slog.Logger
 }
 
 func NewServer(cfg config.Config, prom *promql.Client, tempo *traces.Client, loki *logs.Client,
-	cache *kube.Cache, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, prom: prom, tempo: tempo, loki: loki, cache: cache, log: log}
+	am *alerts.Client, cache *kube.Cache, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, prom: prom, tempo: tempo, loki: loki, alerts: am, cache: cache, log: log}
 }
 
 func (s *Server) thresholds() health.Thresholds {
@@ -74,6 +76,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/services/{name}/logs", s.handleServiceLogs)
 	mux.HandleFunc("GET /api/services/{name}/traces", s.handleServiceTraces)
 	mux.HandleFunc("GET /api/traces/{traceID}/logs", s.handleTraceLogs)
+	mux.HandleFunc("GET /api/map", s.handleMap)
+	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
 	mux.HandleFunc("GET /api/diagnostics", s.handleDiagnostics)
 	return mux
 }
@@ -113,6 +117,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		spark = map[promql.Key][]float64{}
 	}
 
+	firing := s.firingByService(ctx)
 	thresholds := s.thresholds()
 
 	out := make([]Service, 0, len(red))
@@ -134,6 +139,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			ErrorRate: m.ErrorRatio,
 			P95:       m.P95,
 		}
+		applyAlerts(&in, firing[key.Service])
 
 		// The Kubernetes half is best-effort. A service can report spans from
 		// outside the cluster, and the screen still has something to show.

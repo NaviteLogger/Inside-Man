@@ -1,5 +1,7 @@
 import type {
+  AlertsResponse,
   DiagnosticsResponse,
+  MapResponse,
   ServiceDetail,
   ServiceLogsResponse,
   ServiceTracesResponse,
@@ -26,6 +28,8 @@ async function get<T>(path: string): Promise<T> {
 
 export const fetchServices = () => get<ServicesResponse>('/api/services');
 export const fetchDiagnostics = () => get<DiagnosticsResponse>('/api/diagnostics');
+export const fetchMap = () => get<MapResponse>('/api/map');
+export const fetchAlerts = () => get<AlertsResponse>('/api/alerts');
 
 export const fetchService = (name: string, namespace?: string) =>
   get<ServiceDetail>(
