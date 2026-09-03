@@ -129,8 +129,10 @@ spec:
   selector: { app: demo-backend }
   ports: [{ port: 8080, targetPort: 8080 }]
 ---
-# Drives continuous traffic so the demo has live RED metrics, with roughly one
-# in five requests taking the failure path.
+# Drives steady, successful traffic so the demo has live RED metrics and a
+# healthy baseline. The failure path is reached on demand, by requesting
+# /checkout?fail=1, which is how the e2e suite exercises the health model
+# without leaving every service permanently critical.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -150,14 +152,8 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              i=0
               while true; do
-                i=$((i + 1))
-                if [ $((i % 5)) -eq 0 ]; then
-                  curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"
-                else
-                  curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout"
-                fi
+                curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout"
                 sleep 2
               done
           resources:
