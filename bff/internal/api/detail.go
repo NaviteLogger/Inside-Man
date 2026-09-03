@@ -79,6 +79,7 @@ func (s *Server) handleServiceDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := health.Input{HasSpans: m.RequestRate > 0, ErrorRate: m.ErrorRatio, P95: m.P95}
+	applyAlerts(&in, s.firingByService(ctx)[key.Service])
 
 	if key.Namespace != "" {
 		if wl, err := s.cache.Lookup(key.Namespace, key.Service); err == nil {
