@@ -146,7 +146,19 @@ print(",".join(sorted(r["metric"].get("service_name", "?") for r in res)))
   done
 
   # Dependencies, which drive the service map in M4.
-  edges="$(promql 'sum by (client, server) (rate(traces_service_graph_request_total[5m]))' | python3 -c '
+  #
+  # The servicegraph connector pairs a client span with its server span inside a
+  # time window, and emits a virtual "user" node for any server span whose
+  # client it never saw. On a cold cluster with little traffic that leaves only
+  # user>service edges, so drive some requests and poll for the real chain.
+  kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- sh -c \
+    'i=0; while [ $i -lt 40 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout"; i=$((i+1)); done' \
+    >/dev/null 2>&1
+
+  printf '    waiting for service graph edges'
+  edges=""
+  for _ in $(seq 1 20); do
+    edges="$(promql 'sum by (client, server) (rate(traces_service_graph_request_total[5m]))' | python3 -c '
 import json, sys
 try: res = json.load(sys.stdin)["data"]["result"]
 except Exception: res = []
@@ -156,6 +168,11 @@ for r in res:
     pairs.append(m.get("client", "?") + ">" + m.get("server", "?"))
 print(",".join(sorted(pairs)))
 ')"
+    [[ "${edges}" == *"demo-frontend>demo-api"* && "${edges}" == *"demo-api>demo-backend"* ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
   [[ "${edges}" == *"demo-frontend>demo-api"* && "${edges}" == *"demo-api>demo-backend"* ]] \
     && ok "service graph shows the frontend to api to backend chain" \
     || bad "service graph missing expected edges (saw: ${edges:-none})"
@@ -186,7 +203,11 @@ print(",".join(sorted({s["stream"].get("service_name", "?") for s in res})))
 
   # The pivot the whole product rests on: one trace id, logs from every service
   # it passed through.
-  trace_id="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
+  # Log ingestion lags trace generation, so poll rather than sampling once.
+  printf '    waiting for a trace correlated across all three services'
+  trace_id=""
+  for _ in $(seq 1 20); do
+    trace_id="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
 import json, re, sys
 try: res = json.load(sys.stdin)["data"]["result"]
 except Exception: res = []
@@ -199,6 +220,12 @@ for stream in res:
 multi = [t for t, s in seen.items() if len(s) >= 3]
 print(multi[0] if multi else "")
 ')"
+    [[ -n "${trace_id}" ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
+
   if [[ -n "${trace_id}" ]]; then
     ok "found a trace id spanning all three services in logs"
     hit_svcs="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"} |= "'"${trace_id}"'"' 50 | python3 -c '
