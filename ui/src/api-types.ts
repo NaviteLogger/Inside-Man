@@ -148,7 +148,7 @@ export interface paths {
         /**
          * Firing alerts, newest first, grouped by service
          * @description Silenced and inhibited alerts are left out, since someone suppressed
-         *     them on purpose. An alert naming no service is grouped under an empty
+         *     those knowingly. An alert naming no service is grouped under an empty
          *     key and shown as cluster-wide.
          */
         get: operations["getAlerts"];
