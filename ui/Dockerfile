@@ -5,7 +5,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # nginx substitutes BFF_HOST and BFF_PORT into the template at startup, so the
 # same image works against any release name.
 ENV BFF_HOST=inside-man-bff \
