@@ -112,18 +112,24 @@ print(",".join(sorted(found)))
 import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1")" 2>/dev/null
   }
 
-  # Span metrics need traffic plus a generation interval. Polling beats
-  # sleeping a guessed amount. On a fresh cluster this is the slow part.
-  printf '    waiting for span metrics'
-  for _ in $(seq 1 30); do
-    if [[ -n "$(promql 'count(traces_spanmetrics_calls_total)' | python3 -c '
+  # Wait on the exact query the assertions use. count() goes non-empty on the
+  # first sample, but rate() over 5m needs two samples spread across the window,
+  # so a young cluster reports metrics that no rate query can yet evaluate.
+  printf '    waiting for span metrics to be rateable'
+  for _ in $(seq 1 40); do
+    ready="$(promql 'sum by (service_name) (rate(traces_spanmetrics_calls_total[5m]))' | python3 -c '
 import json, sys
 try: res = json.load(sys.stdin)["data"]["result"]
 except Exception: res = []
-print(res[0]["value"][1] if res else "")
-')" ]]; then break; fi
+print(",".join(sorted(r["metric"].get("service_name", "") for r in res)))
+')"
+    missing=0
+    for svc in "${DEMO_SERVICES[@]}"; do
+      [[ "${ready}" == *"${svc}"* ]] || missing=1
+    done
+    (( missing == 0 )) && break
     printf '.'
-    sleep 10
+    sleep 15
   done
   printf '\n'
 
