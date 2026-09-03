@@ -453,35 +453,41 @@ print(",".join(sorted((json.load(sys.stdin).get("links") or {}).keys())))
     'i=0; while [ $i -lt 20 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"; i=$((i+1)); done' \
     >/dev/null 2>&1
 
-  printf '    waiting for a failing trace to surface on the detail screen'
+  # Tempo can hold a trace before Loki has ingested the log lines that go with
+  # it, so poll the whole condition: a failing trace listed on the detail
+  # screen whose logs resolve across all three services. Polling one half then
+  # asserting the other fails whenever the two stores are a few seconds apart.
+  printf '    waiting for a failing trace and its logs'
   et=""
-  for _ in $(seq 1 16); do
+  walked=""
+  for _ in $(seq 1 20); do
     et="$(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
 import json, sys
 try: traces = json.load(sys.stdin).get("errorTraces") or []
 except Exception: traces = []
 print(traces[0]["traceId"] if traces else "")
 ')"
-    [[ -n "${et}" ]] && break
-    printf '.'
-    sleep 15
-  done
-  printf '\n'
-
-  if [[ -n "${et}" ]]; then
-    ok "the detail screen lists a failing trace"
-    walked="$(bff "/api/traces/${et}/logs" | python3 -c '
+    if [[ -n "${et}" ]]; then
+      walked="$(bff "/api/traces/${et}/logs" | python3 -c '
 import json, sys
 try: lines = json.load(sys.stdin).get("lines") or []
 except Exception: lines = []
 print(",".join(sorted({l["service"] for l in lines})))
 ')"
-    [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] \
-      && ok "its logs resolve across all three services, which is the whole path" \
-      || bad "logs for that trace covered only: ${walked:-nothing}"
-  else
-    bad "no failing trace appeared on the detail screen"
-  fi
+      [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] && break
+    fi
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
+
+  [[ -n "${et}" ]] \
+    && ok "the detail screen lists a failing trace" \
+    || bad "no failing trace appeared on the detail screen"
+
+  [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] \
+    && ok "its logs resolve across all three services, which is the whole path" \
+    || bad "logs for that trace covered only: ${walked:-nothing}"
 
   # The UI has to serve the detail route, which has no file behind it.
   [[ "$(ui_status /services/demo-backend)" == "200" ]] \
