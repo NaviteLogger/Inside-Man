@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite';
+// defineConfig comes from vitest/config so the test block type-checks.
+// Vitest 4 stopped augmenting Vite's own UserConfig with a test key.
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
