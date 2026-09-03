@@ -145,20 +145,20 @@ print(",".join(sorted(r["metric"].get("service_name", "?") for r in res)))
       || bad "no span metrics for ${svc} (saw: ${seen:-none})"
   done
 
-  # The failure path is deliberate, so an error ratio of zero means the demo
-  # is not exercising it and the health model is untested.
-  errs="$(promql 'sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))' | python3 -c '
-import json, sys
-try: res = json.load(sys.stdin)["data"]["result"]
-except Exception: res = []
-print(res[0]["value"][1] if res else "0")
-')"
-  python3 -c "import sys; sys.exit(0 if float('${errs}') > 0 else 1)" 2>/dev/null \
-    && ok "error-path spans are being recorded" \
-    || bad "no error spans recorded, health model is unexercised"
-
   # Dependencies, which drive the service map in M4.
-  edges="$(promql 'sum by (client, server) (rate(traces_service_graph_request_total[5m]))' | python3 -c '
+  #
+  # The servicegraph connector pairs a client span with its server span inside a
+  # time window, and emits a virtual "user" node for any server span whose
+  # client it never saw. On a cold cluster with little traffic that leaves only
+  # user>service edges, so drive some requests and poll for the real chain.
+  kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- sh -c \
+    'i=0; while [ $i -lt 40 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout"; i=$((i+1)); done' \
+    >/dev/null 2>&1
+
+  printf '    waiting for service graph edges'
+  edges=""
+  for _ in $(seq 1 20); do
+    edges="$(promql 'sum by (client, server) (rate(traces_service_graph_request_total[5m]))' | python3 -c '
 import json, sys
 try: res = json.load(sys.stdin)["data"]["result"]
 except Exception: res = []
@@ -168,6 +168,11 @@ for r in res:
     pairs.append(m.get("client", "?") + ">" + m.get("server", "?"))
 print(",".join(sorted(pairs)))
 ')"
+    [[ "${edges}" == *"demo-frontend>demo-api"* && "${edges}" == *"demo-api>demo-backend"* ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
   [[ "${edges}" == *"demo-frontend>demo-api"* && "${edges}" == *"demo-api>demo-backend"* ]] \
     && ok "service graph shows the frontend to api to backend chain" \
     || bad "service graph missing expected edges (saw: ${edges:-none})"
@@ -198,7 +203,11 @@ print(",".join(sorted({s["stream"].get("service_name", "?") for s in res})))
 
   # The pivot the whole product rests on: one trace id, logs from every service
   # it passed through.
-  trace_id="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
+  # Log ingestion lags trace generation, so poll rather than sampling once.
+  printf '    waiting for a trace correlated across all three services'
+  trace_id=""
+  for _ in $(seq 1 20); do
+    trace_id="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"}' | python3 -c '
 import json, re, sys
 try: res = json.load(sys.stdin)["data"]["result"]
 except Exception: res = []
@@ -211,6 +220,12 @@ for stream in res:
 multi = [t for t, s in seen.items() if len(s) >= 3]
 print(multi[0] if multi else "")
 ')"
+    [[ -n "${trace_id}" ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
+
   if [[ -n "${trace_id}" ]]; then
     ok "found a trace id spanning all three services in logs"
     hit_svcs="$(loki '{k8s_namespace_name="'"${DEMO_NS}"'"} |= "'"${trace_id}"'"' 50 | python3 -c '
@@ -293,8 +308,150 @@ print(res[0]["value"][1] if res else "0")
   (( series < 100 )) \
     && ok "traces_spanmetrics_calls_total has ${series} series, under 100" \
     || bad "traces_spanmetrics_calls_total has ${series} series, cardinality budget breached"
+  # M2: the services list, its health model, and the UI in front of it.
+  group "M2: the API answers with services joined to workloads"
+
+  bff() {
+    kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s \
+      "http://inside-man-bff.${NAMESPACE}.svc:8080$1" 2>/dev/null
+  }
+  ui() {
+    kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s \
+      "http://inside-man-ui.${NAMESPACE}.svc:80$1" 2>/dev/null
+  }
+  ui_status() {
+    kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s -o /dev/null \
+      -w '%{http_code}' "http://inside-man-ui.${NAMESPACE}.svc:80$1" 2>/dev/null
+  }
+
+  listed="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin)["services"]
+except Exception: svcs = []
+print(",".join(sorted(s["name"] for s in svcs)))
+')"
+  for svc in "${DEMO_SERVICES[@]}"; do
+    [[ "${listed}" == *"${svc}"* ]] \
+      && ok "/api/services lists ${svc}" \
+      || bad "/api/services is missing ${svc} (saw: ${listed:-none})"
+  done
+
+  joined="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin)["services"]
+except Exception: svcs = []
+print(sum(1 for s in svcs if s.get("workload") and s["workload"].get("desired", 0) > 0))
+')"
+  (( joined >= 3 )) \
+    && ok "all three services joined to a Deployment with pod counts" \
+    || bad "only ${joined} services carried workload detail"
+
+  # A number the user cannot explain is worse than no number at all.
+  explained="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin)["services"]
+except Exception: svcs = []
+bad = [s["name"] for s in svcs
+       if s["health"]["status"] != "healthy" and not s["health"].get("reasons")]
+print(",".join(bad))
+')"
+  [[ -z "${explained}" ]] \
+    && ok "every non-healthy status carries a reason" \
+    || bad "status without a reason: ${explained}"
+
+  group "M2: diagnostics and the UI"
+
+  failing="$(bff /api/diagnostics | python3 -c '
+import json, sys
+try: checks = json.load(sys.stdin)["checks"]
+except Exception: checks = []
+print(",".join(c["name"] for c in checks if c["status"] == "fail"))
+')"
+  [[ -z "${failing}" ]] \
+    && ok "diagnostics reports no failing checks" \
+    || bad "diagnostics failing: ${failing}"
+
+  [[ "$(ui_status /)" == "200" ]] \
+    && ok "UI serves its shell" \
+    || bad "UI did not return 200"
+
+  # Client-side routes have no file behind them, so this proves the fallback.
+  [[ "$(ui_status /diagnostics)" == "200" ]] \
+    && ok "UI serves client-side routes" \
+    || bad "UI has no SPA fallback for /diagnostics"
+
+  via_ui="$(ui /api/services | python3 -c '
+import json, sys
+try: print(len(json.load(sys.stdin)["services"]))
+except Exception: print(0)
+')"
+  (( via_ui >= 3 )) \
+    && ok "UI proxies the API on its own origin" \
+    || bad "UI proxy returned ${via_ui} services"
+
+  # The health model has to react to a real outage, which is M2's whole point.
+  group "M2: health reacts to a broken service"
+
+  # Errors from an earlier run stay in the query window. Waiting for them to
+  # age out keeps this independent of whatever ran before.
+  printf '    waiting for a healthy baseline'
+  before=""
+  for _ in $(seq 1 28); do
+    before="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin)["services"]
+except Exception: svcs = []
+print(",".join(sorted({s["health"]["status"] for s in svcs})))
+')"
+    [[ "${before}" == "healthy" ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
+
+  [[ "${before}" == "healthy" ]] \
+    && ok "every service is healthy before the outage" \
+    || bad "no healthy baseline within 7m, saw: ${before:-none}"
+
+  # Scaling to zero gives a sustained outage. Deleting a single pod recovers so
+  # fast that the error ratio hovers on the threshold and flaps.
+  kubectl scale deploy/demo-backend -n "${DEMO_NS}" --replicas=0 >/dev/null 2>&1
+  printf '    backend scaled to zero, watching health'
+  degraded=""
+  for _ in $(seq 1 18); do
+    sleep 15
+    printf '.'
+    degraded="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin)["services"]
+except Exception: svcs = []
+print(",".join(sorted(s["name"] for s in svcs if s["health"]["status"] == "critical")))
+')"
+    [[ -n "${degraded}" ]] && break
+  done
+  printf '\n'
+
+  [[ -n "${degraded}" ]] \
+    && ok "a service turned critical after the outage: ${degraded}" \
+    || bad "no service turned critical within 4m of the backend going away"
+
+  kubectl scale deploy/demo-backend -n "${DEMO_NS}" --replicas=1 >/dev/null 2>&1
+  kubectl rollout status deploy/demo-backend -n "${DEMO_NS}" --timeout=3m >/dev/null 2>&1 \
+    && ok "backend restored" \
+    || bad "backend did not come back after the test"
+
+  # Error spans are recorded, which the outage above has now guaranteed.
+  errs="$(promql 'sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))' | python3 -c '
+import json, sys
+try: res = json.load(sys.stdin)["data"]["result"]
+except Exception: res = []
+print(res[0]["value"][1] if res else "0")
+')"
+  python3 -c "import sys; sys.exit(0 if float('${errs}') > 0 else 1)" 2>/dev/null \
+    && ok "error-path spans are recorded" \
+    || bad "no error spans recorded, the health model is unexercised"
 else
-  group "M1: skipped, no ${DEMO_NS} namespace"
+  group "M1 and M2: skipped, no ${DEMO_NS} namespace"
 fi
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "${pass}" "${fail}"

@@ -28,7 +28,8 @@
         "streetsidesoftware.code-spell-checker-polish",
         "bradlc.vscode-tailwindcss",
         "Angular.ng-template",
-        "Anthropic.claude-code"
+        "Anthropic.claude-code",
+        "vscjava.vscode-java-pack"
       ]
     }
   },

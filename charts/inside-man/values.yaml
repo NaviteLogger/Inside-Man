@@ -18,9 +18,58 @@ insideMan:
     samplerType: parentbased_traceidratio
     samplerArg: "1.0"
 
-# Off by default so a fresh install works without an identity provider.
+# Our API server. See docs/decisions/0001-bff-in-go.md.
+bff:
+  enabled: true
+  replicas: 1
+  image:
+    repository: inside-man-bff
+    tag: local
+    pullPolicy: IfNotPresent
+  prometheusURL: http://inside-man-prometheus.inside-man.svc:80
+  lokiURL: http://inside-man-loki-gateway.inside-man.svc:80
+  tempoURL: http://inside-man-tempo.inside-man.svc:3200
+  # Every rate() and histogram_quantile uses this window.
+  queryWindow: 5m
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# The service-centric front end.
+ui:
+  enabled: true
+  replicas: 1
+  image:
+    repository: inside-man-ui
+    tag: local
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    nodePort: 30080
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+# One login in front of both the UI and Grafana. Off by default so a fresh
+# install works with no identity provider, which is what the quick start and
+# the e2e suite rely on. See docs/auth.md before turning it on.
 oauth2-proxy:
   enabled: false
+  config:
+    # Set clientID, clientSecret and cookieSecret through
+    # existingSecret, so they never live in a values file.
+    existingSecret: ""
+  extraArgs:
+    provider: oidc
+    # The UI is the upstream; Grafana is reached through its own route.
+    upstream: http://inside-man-ui.inside-man.svc:80
+    email-domain: "*"
+    # Grafana trusts this header when auth.proxy is enabled, so a single
+    # sign-in covers both surfaces.
+    set-xauthrequest: "true"
+    pass-user-headers: "true"
+  ingress:
+    enabled: false
 
 # Ingest. See docs/decisions/0003-use-k8s-monitoring-chart.md for why this
 # chart replaces a hand-written Alloy config and a separate OTel Collector.

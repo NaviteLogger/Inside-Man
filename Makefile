@@ -43,8 +43,14 @@ cluster: bootstrap ## Create the local kind cluster (idempotent)
 deps: bootstrap ## Resolve and vendor chart dependencies into $(CHART)/charts
 	@helm dependency update $(CHART)
 
+.PHONY: images
+images: cluster ## Build the BFF and UI images and load them into the cluster
+	@docker build -q -t inside-man-bff:local bff > /dev/null
+	@docker build -q -t inside-man-ui:local ui > /dev/null
+	@kind load docker-image inside-man-bff:local inside-man-ui:local --name $(CLUSTER) > /dev/null
+
 .PHONY: up
-up: cluster ## Install/upgrade the umbrella chart onto the cluster
+up: images ## Install/upgrade the umbrella chart onto the cluster
 	@helm upgrade --install $(RELEASE) $(CHART) \
 		--namespace $(NAMESPACE) --create-namespace \
 		--wait --timeout 15m
@@ -55,9 +61,16 @@ down: ## Delete the local kind cluster
 	@rm -f $(KUBECONFIG)
 
 .PHONY: lint
-lint: bootstrap ## Lint the chart and shell scripts
+lint: bootstrap ## Lint the chart, shell scripts, Go and TypeScript
 	@helm lint $(CHART)
 	@bash -n scripts/*.sh
+	@cd bff && gofmt -l . | (! grep .) && go vet ./...
+	@cd ui && npm ci --silent && npm run typecheck
+
+.PHONY: test
+test: bootstrap ## Run the BFF and UI unit tests
+	@cd bff && go test ./...
+	@cd ui && npm ci --silent && npm test
 
 .PHONY: template
 template: bootstrap ## Render the chart to stdout (no cluster needed)

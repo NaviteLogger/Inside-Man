@@ -11,6 +11,8 @@ kubeconfig-*
 bin/
 dist/
 node_modules/
+ui/dist/
+bff/bff
 *.test
 coverage/
 .coverage
