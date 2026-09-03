@@ -22,12 +22,45 @@ jobs:
           fetch-depth: 0   # gitleaks scans commit history
       - run: make secrets
 
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bff/go.mod
+          cache-dependency-path: bff/go.sum
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Go vet and formatting
+        run: |
+          cd bff
+          gofmt -l . | (! grep .)
+          go vet ./...
+      - name: Go tests
+        run: cd bff && go test -race ./...
+      - name: UI typecheck and tests
+        run: |
+          cd ui
+          npm ci
+          npm run typecheck
+          npm test
+
   chart:
     name: Chart lint and render
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: make lint
+      - name: Helm lint
+        run: |
+          export PATH="$PWD/.tools/bin:$PATH"
+          bash scripts/bootstrap.sh
+          helm lint charts/inside-man
+          bash -n scripts/*.sh
       # Render both profiles, otherwise the HA path rots unnoticed.
       - name: Render default (small) profile
         run: make template

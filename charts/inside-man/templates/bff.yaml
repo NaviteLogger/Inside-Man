@@ -1,0 +1,73 @@
+{{- if .Values.bff.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "inside-man.fullname" . }}-bff
+  labels:
+    {{- include "inside-man.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bff
+spec:
+  replicas: {{ .Values.bff.replicas }}
+  selector:
+    matchLabels:
+      {{- include "inside-man.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: bff
+  template:
+    metadata:
+      labels:
+        {{- include "inside-man.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bff
+    spec:
+      serviceAccountName: {{ include "inside-man.fullname" . }}-bff
+      containers:
+        - name: bff
+          image: "{{ .Values.bff.image.repository }}:{{ .Values.bff.image.tag }}"
+          imagePullPolicy: {{ .Values.bff.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PROMETHEUS_URL
+              value: {{ .Values.bff.prometheusURL | quote }}
+            - name: LOKI_URL
+              value: {{ .Values.bff.lokiURL | quote }}
+            - name: TEMPO_URL
+              value: {{ .Values.bff.tempoURL | quote }}
+            - name: HEALTH_ERROR_RATE_WARN
+              value: {{ .Values.insideMan.health.errorRateWarn | quote }}
+            - name: HEALTH_ERROR_RATE_CRIT
+              value: {{ .Values.insideMan.health.errorRateCrit | quote }}
+            - name: HEALTH_P95_WARN
+              value: {{ printf "%vs" .Values.insideMan.health.p95WarnSeconds | quote }}
+            - name: QUERY_WINDOW
+              value: {{ .Values.bff.queryWindow | quote }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+          resources:
+            {{- toYaml .Values.bff.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "inside-man.fullname" . }}-bff
+  labels:
+    {{- include "inside-man.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bff
+spec:
+  selector:
+    {{- include "inside-man.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: bff
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}
