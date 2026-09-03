@@ -20,7 +20,12 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # gitleaks scans commit history
-      - run: make secrets
+      - name: Secret scan
+        run: |
+          bash scripts/bootstrap.sh gitleaks
+          export PATH="$PWD/.tools/bin:$PATH"
+          gitleaks dir . --config .gitleaks.toml --no-banner --redact
+          gitleaks git . --config .gitleaks.toml --no-banner --redact
 
   unit:
     name: Unit tests
@@ -68,8 +73,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Helm lint
         run: |
+          bash scripts/bootstrap.sh helm
           export PATH="$PWD/.tools/bin:$PATH"
-          bash scripts/bootstrap.sh
           helm lint charts/inside-man
           bash -n scripts/*.sh
       # Render both profiles, otherwise the HA path rots unnoticed.

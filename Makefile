@@ -29,8 +29,22 @@ help: ## Show this help
 bootstrap: ## Install the pinned toolchain into .tools/bin
 	@bash scripts/bootstrap.sh
 
+# Targets ask for the tools they actually use, so a chart lint does not pull a
+# Go toolchain down from go.dev.
+.PHONY: bootstrap-cluster
+bootstrap-cluster:
+	@bash scripts/bootstrap.sh kubectl kind helm
+
+.PHONY: bootstrap-helm
+bootstrap-helm:
+	@bash scripts/bootstrap.sh helm
+
+.PHONY: bootstrap-gitleaks
+bootstrap-gitleaks:
+	@bash scripts/bootstrap.sh gitleaks
+
 .PHONY: cluster
-cluster: bootstrap ## Create the local kind cluster (idempotent)
+cluster: bootstrap-cluster ## Create the local kind cluster (idempotent)
 	@if kind get clusters 2>/dev/null | grep -qx "$(CLUSTER)"; then \
 		echo "cluster $(CLUSTER) already exists"; \
 	else \
@@ -61,23 +75,23 @@ down: ## Delete the local kind cluster
 	@rm -f $(KUBECONFIG)
 
 .PHONY: lint
-lint: bootstrap ## Lint the chart, shell scripts, Go and TypeScript
+lint: bootstrap-helm ## Lint the chart, shell scripts, Go and TypeScript
 	@helm lint $(CHART)
 	@bash -n scripts/*.sh
 	@cd bff && gofmt -l . | (! grep .) && go vet ./...
 	@cd ui && npm ci --silent && npm run typecheck
 
 .PHONY: test
-test: bootstrap ## Run the BFF and UI unit tests
+test: ## Run the BFF and UI unit tests
 	@cd bff && go test ./...
 	@cd ui && npm ci --silent && npm test
 
 .PHONY: template
-template: bootstrap ## Render the chart to stdout (no cluster needed)
+template: bootstrap-helm ## Render the chart to stdout (no cluster needed)
 	@helm template $(RELEASE) $(CHART) --namespace $(NAMESPACE)
 
 .PHONY: secrets
-secrets: bootstrap ## Scan the working tree and history for leaked secrets
+secrets: bootstrap-gitleaks ## Scan the working tree and history for leaked secrets
 	@gitleaks dir . --config .gitleaks.toml --no-banner --redact
 	@gitleaks git . --config .gitleaks.toml --no-banner --redact
 
