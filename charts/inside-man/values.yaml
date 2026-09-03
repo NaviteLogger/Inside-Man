@@ -11,6 +11,14 @@ insideMan:
     errorRateCrit: 0.05
     p95WarnSeconds: 0.5
 
+  # Baseline alert rules, mirroring the health model above so an alert and a red
+  # badge mean the same thing.
+  alerts:
+    enabled: true
+    for:
+      critical: 2m
+      warning: 5m
+
   instrumentation:
     enabled: true
     # Go is excluded, see docs/decisions/0007-demo-app-languages.md
@@ -212,8 +220,27 @@ opentelemetry-operator:
 # See docs/decisions/0002-prometheus-default-mimir-for-ha.md.
 prometheus:
   enabled: true
+  # Our baseline rules live in templates/alert-rules.yaml, because a values
+  # file is not templated and the rules have to interpolate the health
+  # thresholds above. One source for both is what makes an alert and a red
+  # badge carry the same meaning.
+  #
+  # The mount sits outside /etc/config so it does not nest inside the chart's
+  # own config mount. rule_files repeats the chart defaults, since Helm
+  # replaces a list outright when values override it.
+  serverFiles:
+    prometheus.yml:
+      rule_files:
+        - /etc/config/recording_rules.yml
+        - /etc/config/alerting_rules.yml
+        - /etc/inside-man/*.rules
   server:
     fullnameOverride: inside-man-prometheus
+    extraConfigmapMounts:
+      - name: inside-man-alert-rules
+        mountPath: /etc/inside-man
+        configMap: inside-man-alert-rules
+        readOnly: true
     retention: 15d
     # extraFlags carries argumentless flags. The chart's extraArgs map cannot
     # express one: a null value in a values file is a delete instruction to
