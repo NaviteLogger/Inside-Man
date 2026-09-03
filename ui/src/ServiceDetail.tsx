@@ -54,7 +54,7 @@ export function ServiceDetail({ name, namespace, onBack }: Props) {
     // it to that request, which is the three-clicks path the design doc asks
     // for: services, service, failing trace, its logs.
     const load = pinnedTrace ? fetchTraceLogs(pinnedTrace) : fetchServiceLogs(name);
-    load.then((r) => setLines(r.lines)).catch(() => setLines([]));
+    load.then((r) => setLines(r.lines ?? [])).catch(() => setLines([]));
   }, [name, pinnedTrace]);
 
   if (error) {

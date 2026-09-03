@@ -177,3 +177,23 @@ ol.logs { list-style: none; margin: 0; padding: 0; }
 ol.logs li { border-bottom: 1px solid var(--line); display: flex; gap: 10px; padding: 5px 0; }
 ol.logs code { font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
 .log-service { color: var(--muted); flex: 0 0 110px; font-size: 12px; }
+
+/* Service map */
+svg.map { display: block; max-width: 100%; height: auto; margin: 8px 0 16px; }
+svg.map .edge line { stroke: var(--line); stroke-width: 1.5; }
+svg.map .edge.has-errors line { stroke: var(--critical); }
+svg.map marker path { fill: var(--line); }
+svg.map .node circle { stroke: var(--bg); stroke-width: 2; }
+svg.map .node text { fill: var(--fg); font-size: 12px; }
+svg.map .node[role='button'] { cursor: pointer; }
+svg.map .node[role='button']:hover circle { stroke: var(--fg); }
+svg.map .node-healthy circle { fill: var(--healthy); }
+svg.map .node-warning circle { fill: var(--warning); }
+svg.map .node-critical circle { fill: var(--critical); }
+svg.map .node-unknown circle { fill: var(--unknown); }
+
+/* Issues */
+ul.alerts { list-style: none; margin: 0; padding: 0; }
+.alert { align-items: flex-start; border-bottom: 1px solid var(--line); display: flex; gap: 12px; padding: 10px 2px; }
+.alert-body { flex: 1; }
+.alert-since { white-space: nowrap; }
