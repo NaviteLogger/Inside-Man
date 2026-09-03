@@ -9,6 +9,7 @@ package promql
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/prometheus/client_golang/api"
@@ -168,4 +169,144 @@ func keyOf(m model.Metric) Key {
 		Service:   string(m[labelService]),
 		Namespace: string(m[labelNamespace]),
 	}
+}
+
+// Edge is one dependency between two services, from the service graph.
+type Edge struct {
+	Client      string  `json:"client"`
+	Server      string  `json:"server"`
+	RequestRate float64 `json:"requestRate"`
+	ErrorRatio  float64 `json:"errorRatio"`
+}
+
+// Dependencies returns the service graph edges touching the given service, so
+// the detail screen can show what calls it and what it calls.
+func (c *Client) Dependencies(ctx context.Context, service string) (inbound, outbound []Edge, err error) {
+	w := model.Duration(c.window).String()
+
+	total, err := c.edges(ctx, fmt.Sprintf(
+		`sum by (client, server) (rate(traces_service_graph_request_total[%s]))`, w))
+	if err != nil {
+		return nil, nil, fmt.Errorf("service graph: %w", err)
+	}
+	failed, err := c.edges(ctx, fmt.Sprintf(
+		`sum by (client, server) (rate(traces_service_graph_request_failed_total[%s]))`, w))
+	if err != nil {
+		// Failure counts are a refinement, so a missing series should not cost
+		// the caller its topology.
+		failed = map[[2]string]float64{}
+	}
+
+	for pair, rate := range total {
+		e := Edge{Client: pair[0], Server: pair[1], RequestRate: rate}
+		if rate > 0 {
+			e.ErrorRatio = failed[pair] / rate
+		}
+		switch service {
+		case pair[1]:
+			inbound = append(inbound, e)
+		case pair[0]:
+			outbound = append(outbound, e)
+		}
+	}
+	sortEdges(inbound)
+	sortEdges(outbound)
+	return inbound, outbound, nil
+}
+
+// AllEdges returns the whole service graph, which the map screen needs in M4.
+func (c *Client) AllEdges(ctx context.Context) ([]Edge, error) {
+	total, err := c.edges(ctx, fmt.Sprintf(
+		`sum by (client, server) (rate(traces_service_graph_request_total[%s]))`,
+		model.Duration(c.window).String()))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Edge, 0, len(total))
+	for pair, rate := range total {
+		out = append(out, Edge{Client: pair[0], Server: pair[1], RequestRate: rate})
+	}
+	sortEdges(out)
+	return out, nil
+}
+
+func sortEdges(e []Edge) {
+	sort.Slice(e, func(i, j int) bool {
+		if e[i].RequestRate != e[j].RequestRate {
+			return e[i].RequestRate > e[j].RequestRate
+		}
+		return e[i].Client+e[i].Server < e[j].Client+e[j].Server
+	})
+}
+
+func (c *Client) edges(ctx context.Context, query string) (map[[2]string]float64, error) {
+	val, _, err := c.api.Query(ctx, query, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	vec, ok := val.(model.Vector)
+	if !ok {
+		return nil, fmt.Errorf("expected a vector, got %s", val.Type())
+	}
+	out := make(map[[2]string]float64, len(vec))
+	for _, s := range vec {
+		out[[2]string{string(s.Metric["client"]), string(s.Metric["server"])}] = float64(s.Value)
+	}
+	return out, nil
+}
+
+// PodUsage is the CPU and memory a pod is using right now.
+type PodUsage struct {
+	CPUMillis float64 `json:"cpuMillis"`
+	MemBytes  float64 `json:"memBytes"`
+}
+
+// PodResources returns per-pod usage for a namespace.
+//
+// cAdvisor labels these `namespace` and `pod`, where span metrics use
+// k8s_namespace_name and k8s_pod_name. The names differ by origin, and the
+// join happens here so no recording rule has to exist for it.
+func (c *Client) PodResources(ctx context.Context, namespace string) (map[string]*PodUsage, error) {
+	w := model.Duration(c.window).String()
+	out := map[string]*PodUsage{}
+
+	cpu, err := c.byPod(ctx, fmt.Sprintf(
+		`sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=%q,container!=""}[%s]))`,
+		namespace, w))
+	if err != nil {
+		return nil, fmt.Errorf("pod cpu: %w", err)
+	}
+	for pod, v := range cpu {
+		out[pod] = &PodUsage{CPUMillis: v * 1000}
+	}
+
+	mem, err := c.byPod(ctx, fmt.Sprintf(
+		`sum by (pod) (container_memory_working_set_bytes{namespace=%q,container!=""})`, namespace))
+	if err != nil {
+		return nil, fmt.Errorf("pod memory: %w", err)
+	}
+	for pod, v := range mem {
+		if u, ok := out[pod]; ok {
+			u.MemBytes = v
+		} else {
+			out[pod] = &PodUsage{MemBytes: v}
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) byPod(ctx context.Context, query string) (map[string]float64, error) {
+	val, _, err := c.api.Query(ctx, query, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	vec, ok := val.(model.Vector)
+	if !ok {
+		return nil, fmt.Errorf("expected a vector, got %s", val.Type())
+	}
+	out := make(map[string]float64, len(vec))
+	for _, s := range vec {
+		out[string(s.Metric["pod"])] = float64(s.Value)
+	}
+	return out, nil
 }

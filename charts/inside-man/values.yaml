@@ -31,6 +31,9 @@ bff:
   tempoURL: http://inside-man-tempo.inside-man.svc:3200
   # Every rate() and histogram_quantile uses this window.
   queryWindow: 5m
+  # Where the browser reaches Grafana, for the Drilldown deep links. The kind
+  # cluster maps Grafana's NodePort to localhost:3000.
+  grafanaExternalURL: http://localhost:3000
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }

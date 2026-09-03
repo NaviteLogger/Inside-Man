@@ -71,15 +71,23 @@ single OIDC login.
 | | | Status |
 |---|---|---|
 | M0 | Foundations: repo, CI, kind bootstrap, chart installs | done |
-| M1 | The bundle works: trace to logs to RED metrics, zero config | in progress |
-| M2 | Service list: `/api/services`, UI home screen, diagnostics page | |
-| M3 | Service detail: pods, dependencies, traces, logs | |
+| M1 | The bundle works: trace to logs to RED metrics, zero config | done |
+| M2 | Service list: `/api/services`, UI home screen, diagnostics page | done |
+| M3 | Service detail: pods, dependencies, traces, logs | done |
 | M4 | Service map and issues | |
 
 Non-goals and the parked backlog are in [docs/v2-backlog.md](docs/v2-backlog.md).
 
+## API
+
+The BFF's contract is [bff/openapi.yaml](bff/openapi.yaml). The UI's types are
+generated from it with `npm run gen-types`, and CI fails when the checked-in
+`ui/src/api-types.ts` is stale or when a Go response struct drifts from the
+spec.
+
 ## Documentation
 
+- [bff/openapi.yaml](bff/openapi.yaml), the API contract
 - [docs/design.md](docs/design.md), the original specification
 - [docs/join-key.md](docs/join-key.md), the convention every screen depends on
 - [docs/decisions/](docs/decisions/), the accepted decision records

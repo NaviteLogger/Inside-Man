@@ -17,3 +17,10 @@ export function formatMillis(ms: number): string {
   if (ms >= 10) return `${Math.round(ms)}ms`;
   return `${ms.toFixed(1)}ms`;
 }
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '–';
+  const mib = bytes / 1024 / 1024;
+  if (mib >= 1024) return `${(mib / 1024).toFixed(2)}GiB`;
+  return `${Math.round(mib)}MiB`;
+}

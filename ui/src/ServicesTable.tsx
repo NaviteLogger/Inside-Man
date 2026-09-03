@@ -3,7 +3,12 @@ import { Sparkline } from './Sparkline';
 import { formatMillis, formatPercent, formatRate } from './format';
 import type { Service } from './types';
 
-export function ServicesTable({ services }: { services: Service[] }) {
+interface Props {
+  services: Service[];
+  onSelect?: (name: string, namespace?: string) => void;
+}
+
+export function ServicesTable({ services, onSelect }: Props) {
   if (services.length === 0) {
     // Design doc 5.3: empty states teach.
     return (
@@ -40,7 +45,15 @@ export function ServicesTable({ services }: { services: Service[] }) {
         {services.map((s) => (
           <tr key={`${s.namespace}/${s.name}`} className={`row-${s.health.status}`}>
             <td><HealthBadge health={s.health} /></td>
-            <th scope="row">{s.name}</th>
+            <th scope="row">
+              {onSelect ? (
+                <button type="button" className="link" onClick={() => onSelect(s.name, s.namespace)}>
+                  {s.name}
+                </button>
+              ) : (
+                s.name
+              )}
+            </th>
             <td className="muted">{s.namespace || '–'}</td>
             <td className="num">{formatRate(s.requestRate)}</td>
             <td className={`num ${s.errorRatio > 0 ? 'has-errors' : ''}`}>

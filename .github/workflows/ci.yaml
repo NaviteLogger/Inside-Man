@@ -43,10 +43,21 @@ jobs:
           go vet ./...
       - name: Go tests
         run: cd bff && go test -race ./...
+      - name: OpenAPI spec lint
+        run: cd ui && npm ci && npm run lint-spec
+
+      # The UI's types are generated from the spec, so a stale checked-in file
+      # means the UI is typed against an API that no longer exists.
+      - name: Generated types are current
+        run: |
+          cd ui
+          npm run gen-types
+          git diff --exit-code -- src/api-types.ts \
+            || { echo "src/api-types.ts is stale, run 'npm run gen-types' in ui/"; exit 1; }
+
       - name: UI typecheck and tests
         run: |
           cd ui
-          npm ci
           npm run typecheck
           npm test
 

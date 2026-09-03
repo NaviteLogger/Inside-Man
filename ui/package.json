@@ -8,13 +8,16 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen-types": "openapi-typescript ../bff/openapi.yaml -o src/api-types.ts",
+    "lint-spec": "redocly lint --config ../bff/redocly.yaml ../bff/openapi.yaml"
   },
   "dependencies": {
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "@redocly/cli": "^2.51.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.0",
     "@types/node": "^24.13.3",
@@ -22,6 +25,7 @@
     "@types/react-dom": "19.2.1",
     "@vitejs/plugin-react": "5.2.0",
     "jsdom": "27.0.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "5.9.3",
     "vite": "8.2.2",
     "vitest": "4.1.11"

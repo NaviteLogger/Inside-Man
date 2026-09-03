@@ -203,7 +203,7 @@ print(",".join(sorted({s["stream"].get("service_name", "?") for s in res})))
 
   # The pivot the whole product rests on: one trace id, logs from every service
   # it passed through.
-  # Log ingestion lags trace generation, so poll rather than sampling once.
+  # Log ingestion lags trace generation, so this polls for the result.
   printf '    waiting for a trace correlated across all three services'
   trace_id=""
   for _ in $(seq 1 20); do
@@ -388,6 +388,105 @@ except Exception: print(0)
   (( via_ui >= 3 )) \
     && ok "UI proxies the API on its own origin" \
     || bad "UI proxy returned ${via_ui} services"
+
+  # M3: the detail screen's data, and the three-clicks path the design doc asks
+  # for: services, one service, a failing trace, that request's logs.
+  group "M3: service detail joins pods, dependencies and resources"
+
+  detail="$(bff "/api/services/demo-backend?namespace=${DEMO_NS}")"
+
+  echo "${detail}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+missing = [k for k in ("name", "health", "requestRate", "errorRatio", "p95Millis",
+                       "inbound", "outbound", "errorTraces", "links", "window")
+           if k not in d]
+sys.exit(1 if missing else 0)
+' >/dev/null 2>&1 \
+    && ok "/api/services/{name} returns the full detail shape" \
+    || bad "/api/services/{name} is missing fields the UI needs"
+
+  deps="$(echo "${detail}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+print(",".join(e["client"] for e in d.get("inbound", [])))
+')"
+  [[ "${deps}" == *"demo-api"* ]] \
+    && ok "detail shows demo-backend is called by demo-api" \
+    || bad "inbound dependencies missing demo-api (saw: ${deps:-none})"
+
+  pods_with_usage="$(echo "${detail}" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+res = d.get("resources") or {}
+wl = d.get("workload") or {}
+names = {p["name"] for p in wl.get("pods") or []}
+# Usage has to be scoped to the pods of this one service. The cAdvisor
+# query is per namespace and would otherwise include neighbours.
+print(len(res), len(names), int(all(k in names for k in res)))
+')"
+  read -r n_usage n_pods scoped <<<"${pods_with_usage}"
+  (( n_usage > 0 && scoped == 1 )) \
+    && ok "pod CPU and memory reported for ${n_usage} of ${n_pods} pods, scoped to this service" \
+    || bad "resource usage missing or leaking other services' pods (${n_usage} entries, scoped=${scoped})"
+
+  links="$(echo "${detail}" | python3 -c '
+import json, sys
+print(",".join(sorted((json.load(sys.stdin).get("links") or {}).keys())))
+')"
+  [[ "${links}" == "exploreLogs,exploreTraces,logs,traces" ]] \
+    && ok "Grafana Drilldown deep links present" \
+    || bad "expected drilldown links, got: ${links:-none}"
+
+  # A trace id that is not an id has to be refused before it reaches a LogQL
+  # line filter.
+  code="$(kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- curl -s -o /dev/null \
+    -w '%{http_code}' "http://inside-man-bff.${NAMESPACE}.svc:8080/api/traces/not-a-trace/logs" 2>/dev/null)"
+  [[ "${code}" == "400" ]] \
+    && ok "a malformed trace id is rejected with 400" \
+    || bad "malformed trace id returned ${code}, expected 400"
+
+  group "M3: three clicks from the list to a failing request's logs"
+
+  # Drive the failure path so there is something to click through to.
+  kubectl exec -n "${DEMO_NS}" deploy/demo-loadgen -- sh -c \
+    'i=0; while [ $i -lt 20 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"; i=$((i+1)); done' \
+    >/dev/null 2>&1
+
+  printf '    waiting for a failing trace to surface on the detail screen'
+  et=""
+  for _ in $(seq 1 16); do
+    et="$(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
+import json, sys
+try: traces = json.load(sys.stdin).get("errorTraces") or []
+except Exception: traces = []
+print(traces[0]["traceId"] if traces else "")
+')"
+    [[ -n "${et}" ]] && break
+    printf '.'
+    sleep 15
+  done
+  printf '\n'
+
+  if [[ -n "${et}" ]]; then
+    ok "the detail screen lists a failing trace"
+    walked="$(bff "/api/traces/${et}/logs" | python3 -c '
+import json, sys
+try: lines = json.load(sys.stdin).get("lines") or []
+except Exception: lines = []
+print(",".join(sorted({l["service"] for l in lines})))
+')"
+    [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] \
+      && ok "its logs resolve across all three services, which is the whole path" \
+      || bad "logs for that trace covered only: ${walked:-nothing}"
+  else
+    bad "no failing trace appeared on the detail screen"
+  fi
+
+  # The UI has to serve the detail route, which has no file behind it.
+  [[ "$(ui_status /services/demo-backend)" == "200" ]] \
+    && ok "UI serves the service detail route" \
+    || bad "UI has no fallback for /services/{name}"
 
   # The health model has to react to a real outage, which is M2's whole point.
   group "M2: health reacts to a broken service"
