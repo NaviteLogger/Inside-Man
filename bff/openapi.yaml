@@ -1,0 +1,367 @@
+openapi: 3.1.0
+info:
+  title: Inside Man API
+  version: 0.1.0
+  description: |
+    The three signals plus Kubernetes topology, normalised around service
+    identity. Every response is keyed on the service name, which is the
+    convention the whole product rests on. See docs/join-key.md.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+
+servers:
+  - url: /
+    description: Served on the same origin as the UI, which proxies /api to here.
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness and readiness
+      description: |
+        Answers from the process itself without consulting any store, so it has
+        no failure response. A failure is the connection being refused.
+      operationId: getHealthz
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/services:
+    get:
+      summary: Every service with span metrics, worst health first
+      operationId: listServices
+      responses:
+        "200":
+          description: The services list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServicesResponse" }
+        "502":
+          description: The metrics store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/services/{name}:
+    get:
+      summary: One service, with pods, dependencies, resources and failing traces
+      operationId: getService
+      parameters:
+        - $ref: "#/components/parameters/ServiceName"
+        - name: namespace
+          in: query
+          required: false
+          description: Disambiguates a service name that appears in more than one namespace.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The service detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceDetail" }
+        "400":
+          description: No service name was given.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No span metrics for that service in the window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: An upstream store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/services/{name}/logs:
+    get:
+      summary: Recent log lines for a service
+      operationId: getServiceLogs
+      parameters:
+        - $ref: "#/components/parameters/ServiceName"
+        - name: traceId
+          in: query
+          required: false
+          description: Narrows to this service's view of one trace.
+          schema: { $ref: "#/components/schemas/TraceId" }
+      responses:
+        "200":
+          description: Log lines, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceLogsResponse" }
+        "502":
+          description: An upstream store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/services/{name}/traces:
+    get:
+      summary: Recent traces for a service
+      operationId: getServiceTraces
+      parameters:
+        - $ref: "#/components/parameters/ServiceName"
+        - name: status
+          in: query
+          required: false
+          description: Set to error to return only failing traces.
+          schema: { type: string, enum: [error] }
+      responses:
+        "200":
+          description: Trace summaries.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceTracesResponse" }
+        "502":
+          description: An upstream store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/traces/{traceID}/logs:
+    get:
+      summary: Every log line carrying a trace id, across services
+      description: |
+        The pivot the product rests on. The id lives in the log body rather
+        than structured metadata, because Alloy collects container stdout and
+        Loki never sees an OTLP TraceId field.
+      operationId: getTraceLogs
+      parameters:
+        - name: traceID
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/TraceId" }
+      responses:
+        "200":
+          description: Log lines from every service the trace passed through.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TraceLogsResponse" }
+        "400":
+          description: The id was not 16 or 32 hexadecimal characters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/diagnostics:
+    get:
+      summary: Whether the join key is intact
+      operationId: getDiagnostics
+      responses:
+        "200":
+          description: One check per line, whatever their status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiagnosticsResponse" }
+        "502":
+          description: An upstream store could not be queried.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  parameters:
+    ServiceName:
+      name: name
+      in: path
+      required: true
+      description: The service name, which equals the Deployment name.
+      schema: { type: string }
+
+  schemas:
+    TraceId:
+      type: string
+      pattern: "^[0-9a-f]{16}([0-9a-f]{16})?$"
+      description: 16 or 32 lower-case hexadecimal characters.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        hint: { type: string }
+
+    HealthStatus:
+      type: string
+      enum: [healthy, warning, critical, unknown]
+      description: |
+        unknown means no spans in the window, which is not the same as spans
+        that all succeeded.
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: "#/components/schemas/HealthStatus" }
+        reasons:
+          type: array
+          description: Why the status is what it is. Present whenever the status is not healthy.
+          items: { type: string }
+
+    Pod:
+      type: object
+      required: [name, phase, ready, restarts]
+      properties:
+        name: { type: string }
+        phase: { type: string }
+        ready: { type: boolean }
+        restarts: { type: integer }
+        node: { type: string }
+
+    Workload:
+      type: object
+      required: [namespace, kind, name, desired, ready, restarts]
+      properties:
+        namespace: { type: string }
+        kind: { type: string }
+        name: { type: string }
+        desired: { type: integer }
+        ready: { type: integer }
+        restarts: { type: integer }
+        pods:
+          type: array
+          items: { $ref: "#/components/schemas/Pod" }
+
+    Service:
+      type: object
+      required: [name, namespace, health, requestRate, errorRatio, p95Millis]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        health: { $ref: "#/components/schemas/Health" }
+        requestRate: { type: number, description: Requests per second. }
+        errorRatio: { type: number, description: Failing requests as a ratio between 0 and 1. }
+        p95Millis: { type: number }
+        sparkline:
+          type: array
+          items: { type: number }
+        workload: { $ref: "#/components/schemas/Workload" }
+
+    ServicesResponse:
+      type: object
+      required: [services, window]
+      properties:
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/Service" }
+        window:
+          type: string
+          description: The query window, expressed as a Go duration.
+
+    Edge:
+      type: object
+      required: [client, server, requestRate, errorRatio]
+      properties:
+        client: { type: string }
+        server: { type: string }
+        requestRate: { type: number }
+        errorRatio: { type: number }
+
+    PodUsage:
+      type: object
+      required: [cpuMillis, memBytes]
+      properties:
+        cpuMillis: { type: number }
+        memBytes: { type: number }
+
+    TraceSummary:
+      type: object
+      required: [traceId]
+      properties:
+        traceId: { $ref: "#/components/schemas/TraceId" }
+        rootServiceName: { type: string }
+        rootTraceName: { type: string }
+        durationMillis: { type: integer }
+        startTimeUnixNano: { type: string }
+
+    LogLine:
+      type: object
+      required: [timestamp, line, service]
+      properties:
+        timestamp: { type: string, format: date-time }
+        line: { type: string }
+        service: { type: string }
+        pod: { type: string }
+
+    ServiceDetail:
+      type: object
+      required:
+        [name, namespace, health, requestRate, errorRatio, p95Millis,
+         inbound, outbound, errorTraces, links, window]
+      properties:
+        name: { type: string }
+        namespace: { type: string }
+        health: { $ref: "#/components/schemas/Health" }
+        requestRate: { type: number }
+        errorRatio: { type: number }
+        p95Millis: { type: number }
+        workload: { $ref: "#/components/schemas/Workload" }
+        resources:
+          type: object
+          description: Usage per pod, keyed by pod name.
+          additionalProperties: { $ref: "#/components/schemas/PodUsage" }
+        inbound:
+          type: array
+          items: { $ref: "#/components/schemas/Edge" }
+        outbound:
+          type: array
+          items: { $ref: "#/components/schemas/Edge" }
+        errorTraces:
+          type: array
+          items: { $ref: "#/components/schemas/TraceSummary" }
+        links:
+          type: object
+          description: Deep links into Grafana's bundled Drilldown apps.
+          additionalProperties: { type: string }
+        window: { type: string }
+
+    ServiceLogsResponse:
+      type: object
+      required: [service, lines]
+      properties:
+        service: { type: string }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/LogLine" }
+
+    ServiceTracesResponse:
+      type: object
+      required: [service, traces]
+      properties:
+        service: { type: string }
+        traces:
+          type: array
+          items: { $ref: "#/components/schemas/TraceSummary" }
+
+    TraceLogsResponse:
+      type: object
+      required: [traceId, lines]
+      properties:
+        traceId: { $ref: "#/components/schemas/TraceId" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/LogLine" }
+
+    Check:
+      type: object
+      required: [name, status, detail]
+      properties:
+        name: { type: string }
+        status: { type: string, enum: [pass, warn, fail] }
+        detail: { type: string }
+        hint: { type: string }
+
+    DiagnosticsResponse:
+      type: object
+      required: [checks, checkedAt]
+      properties:
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/Check" }
+        checkedAt: { type: string, format: date-time }

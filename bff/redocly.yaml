@@ -1,0 +1,14 @@
+# Redocly's recommended ruleset, with two deliberate exceptions.
+extends:
+  - recommended
+
+rules:
+  # The API carries no authentication of its own. oauth2-proxy sits in front of
+  # the UI, which proxies /api, so identity arrives as a forwarded header and
+  # there is no scheme for this document to declare. See docs/auth.md.
+  security-defined: off
+
+  # /healthz answers from the process without consulting a store, so it has no
+  # 4xx to document. Every other operation documents one.
+  operation-4xx-response:
+    severity: warn

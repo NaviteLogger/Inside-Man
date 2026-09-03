@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ServicesTable } from './ServicesTable';
-import { formatMillis, formatPercent, formatRate } from './format';
+import { formatBytes, formatMillis, formatPercent, formatRate } from './format';
 import type { Service } from './types';
 
 afterEach(() => vi.restoreAllMocks());
@@ -69,5 +69,27 @@ describe('formatting', () => {
     expect(formatMillis(0)).toBe('–');
     expect(formatMillis(NaN)).toBe('–');
     expect(formatMillis(1500)).toBe('1.50s');
+  });
+});
+
+describe('ServicesTable navigation', () => {
+  it('makes each service name a way into its detail screen', async () => {
+    const onSelect = vi.fn();
+    render(<ServicesTable services={[service()]} onSelect={onSelect} />);
+    screen.getByRole('button', { name: 'checkout' }).click();
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith('checkout', 'shop'));
+  });
+
+  it('renders plain text when there is nowhere to navigate', () => {
+    render(<ServicesTable services={[service()]} />);
+    expect(screen.queryByRole('button', { name: 'checkout' })).toBeNull();
+  });
+});
+
+describe('formatBytes', () => {
+  it('switches unit at a gibibyte', () => {
+    expect(formatBytes(0)).toBe('–');
+    expect(formatBytes(85 * 1024 * 1024)).toBe('85MiB');
+    expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe('2.50GiB');
   });
 });

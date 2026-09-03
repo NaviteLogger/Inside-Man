@@ -41,6 +41,17 @@ spec:
               value: {{ printf "%vs" .Values.insideMan.health.p95WarnSeconds | quote }}
             - name: QUERY_WINDOW
               value: {{ .Values.bff.queryWindow | quote }}
+            # Only used to build links the browser follows, so this has to be
+            # an address the user can reach.
+            - name: GRAFANA_EXTERNAL_URL
+              value: {{ .Values.bff.grafanaExternalURL | quote }}
+            # Log queries exclude this namespace. Inside Man's own components
+            # log the trace id being searched for, so without this a request's
+            # logs come back mixed with logs about the query.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 3

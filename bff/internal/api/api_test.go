@@ -18,7 +18,9 @@ import (
 
 	"github.com/NaviteLogger/Inside-Man/bff/internal/config"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/kube"
+	"github.com/NaviteLogger/Inside-Man/bff/internal/logs"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/promql"
+	"github.com/NaviteLogger/Inside-Man/bff/internal/traces"
 )
 
 // vector builds a Prometheus instant-query response body.
@@ -101,7 +103,10 @@ func newTestServer(t *testing.T) (*Server, *stubProm) {
 		ErrorRateWarn: 0.01, ErrorRateCrit: 0.05, P95Warn: 500 * time.Millisecond,
 		PrometheusURL: prom.URL,
 	}
-	return NewServer(cfg, client, cache, slog.New(slog.DiscardHandler)), stub
+	return NewServer(cfg, client,
+		traces.New(prom.URL, 5*time.Second),
+		logs.New(prom.URL, 5*time.Second, "inside-man"),
+		cache, slog.New(slog.DiscardHandler)), stub
 }
 
 func TestServicesRanksWorstFirst(t *testing.T) {

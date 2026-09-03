@@ -1,56 +1,26 @@
-// Mirrors the BFF's JSON. Design doc 11.1 accepted Go for the BFF on the
-// understanding that these types would be generated from an OpenAPI spec.
-// Generation lands with the spec in M3. Until then this file is the contract,
-// and the BFF's tests pin the field names it emits.
-export type HealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
+// Re-exports of the types generated from bff/openapi.yaml, so the rest of the
+// UI imports plain names. Regenerate with `npm run gen-types` after changing
+// the spec; CI fails when src/api-types.ts is stale.
+//
+// This closes the debt ADR 0001 took on. Go was chosen for the BFF partly on
+// the promise that these types would be generated, and now they are.
+import type { components } from './api-types';
 
-export interface Health {
-  status: HealthStatus;
-  reasons?: string[];
-}
+type Schemas = components['schemas'];
 
-export interface Pod {
-  name: string;
-  phase: string;
-  ready: boolean;
-  restarts: number;
-  node?: string;
-}
-
-export interface Workload {
-  namespace: string;
-  kind: string;
-  name: string;
-  desired: number;
-  ready: number;
-  restarts: number;
-  pods?: Pod[];
-}
-
-export interface Service {
-  name: string;
-  namespace: string;
-  health: Health;
-  requestRate: number;
-  errorRatio: number;
-  p95Millis: number;
-  sparkline?: number[];
-  workload?: Workload;
-}
-
-export interface ServicesResponse {
-  services: Service[];
-  window: string;
-}
-
-export interface Check {
-  name: string;
-  status: 'pass' | 'warn' | 'fail';
-  detail: string;
-  hint?: string;
-}
-
-export interface DiagnosticsResponse {
-  checks: Check[];
-  checkedAt: string;
-}
+export type HealthStatus = Schemas['HealthStatus'];
+export type Health = Schemas['Health'];
+export type Pod = Schemas['Pod'];
+export type Workload = Schemas['Workload'];
+export type Service = Schemas['Service'];
+export type ServicesResponse = Schemas['ServicesResponse'];
+export type Edge = Schemas['Edge'];
+export type PodUsage = Schemas['PodUsage'];
+export type TraceSummary = Schemas['TraceSummary'];
+export type LogLine = Schemas['LogLine'];
+export type ServiceDetail = Schemas['ServiceDetail'];
+export type ServiceLogsResponse = Schemas['ServiceLogsResponse'];
+export type ServiceTracesResponse = Schemas['ServiceTracesResponse'];
+export type TraceLogsResponse = Schemas['TraceLogsResponse'];
+export type Check = Schemas['Check'];
+export type DiagnosticsResponse = Schemas['DiagnosticsResponse'];

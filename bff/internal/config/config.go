@@ -16,8 +16,17 @@ type Config struct {
 	LokiURL       string
 	TempoURL      string
 
+	// Used only to build deep links for the browser, so this has to be an
+	// address the user can reach. A cluster-internal service name will not do.
+	GrafanaURL string
+
 	// Namespaces the BFF reports on. Empty means every namespace it can read.
 	Namespaces []string
+
+	// The namespace Inside Man itself runs in. Log queries exclude it, because
+	// the platform logs the very trace id being asked about: nginx records it
+	// in the request URL and Loki records it in the query it just ran.
+	SelfNamespace string
 
 	// Health thresholds, mirroring design doc 5.2.
 	ErrorRateWarn float64
@@ -36,6 +45,8 @@ func Load() (Config, error) {
 		PrometheusURL: env("PROMETHEUS_URL", "http://inside-man-prometheus.inside-man.svc:80"),
 		LokiURL:       env("LOKI_URL", "http://inside-man-loki-gateway.inside-man.svc:80"),
 		TempoURL:      env("TEMPO_URL", "http://inside-man-tempo.inside-man.svc:3200"),
+		GrafanaURL:    env("GRAFANA_EXTERNAL_URL", "http://localhost:3000"),
+		SelfNamespace: env("POD_NAMESPACE", "inside-man"),
 	}
 
 	var err error

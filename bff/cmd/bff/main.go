@@ -15,7 +15,9 @@ import (
 	"github.com/NaviteLogger/Inside-Man/bff/internal/api"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/config"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/kube"
+	"github.com/NaviteLogger/Inside-Man/bff/internal/logs"
 	"github.com/NaviteLogger/Inside-Man/bff/internal/promql"
+	"github.com/NaviteLogger/Inside-Man/bff/internal/traces"
 )
 
 func main() {
@@ -40,6 +42,8 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	tempo := traces.New(cfg.TempoURL, cfg.QueryTimeout)
+	loki := logs.New(cfg.LokiURL, cfg.QueryTimeout, cfg.SelfNamespace)
 
 	// Blocks until the informer caches sync, so the first request served is
 	// already answered from a warm cache.
@@ -51,7 +55,7 @@ func run(log *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           api.NewServer(cfg, prom, cache, log).Routes(),
+		Handler:           api.NewServer(cfg, prom, tempo, loki, cache, log).Routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
