@@ -115,6 +115,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The service graph, with each node coloured by health
+         * @description Nodes come from span metrics, so a service with no traffic in the window
+         *     still appears with unknown health. The graph also names peers that never
+         *     reported spans of their own, such as a database or Tempo's virtual user
+         *     node for a request nobody traced.
+         */
+        get: operations["getMap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Firing alerts, newest first, grouped by service
+         * @description Silenced and inhibited alerts are left out, since someone suppressed
+         *     those knowingly. An alert naming no service is grouped under an empty
+         *     key and shown as cluster-wide.
+         */
+        get: operations["getAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/diagnostics": {
         parameters: {
             query?: never;
@@ -242,6 +287,39 @@ export interface components {
         TraceLogsResponse: {
             traceId: components["schemas"]["TraceId"];
             lines: components["schemas"]["LogLine"][];
+        };
+        MapNode: {
+            name: string;
+            namespace?: string;
+            health: components["schemas"]["Health"];
+            requestRate: number;
+            errorRatio: number;
+        };
+        MapResponse: {
+            nodes: components["schemas"]["MapNode"][];
+            edges: components["schemas"]["Edge"][];
+            window: string;
+        };
+        Alert: {
+            name: string;
+            /** @description Empty when the alert names no service, meaning cluster-wide. */
+            service: string;
+            namespace?: string;
+            severity: string;
+            summary?: string;
+            description?: string;
+            /** Format: date-time */
+            startsAt: string;
+            labels?: {
+                [key: string]: string;
+            };
+        };
+        AlertsResponse: {
+            alerts: components["schemas"]["Alert"][];
+            /** @description The same alerts grouped by service name. */
+            byService: {
+                [key: string]: components["schemas"]["Alert"][];
+            };
         };
         Check: {
             name: string;
@@ -461,6 +539,64 @@ export interface operations {
             };
             /** @description The id was not 16 or 32 hexadecimal characters. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getMap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Nodes and edges. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapResponse"];
+                };
+            };
+            /** @description An upstream store could not be queried. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAlerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Firing alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertsResponse"];
+                };
+            };
+            /** @description Alertmanager could not be queried. */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
