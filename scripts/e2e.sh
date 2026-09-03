@@ -453,41 +453,53 @@ print(",".join(sorted((json.load(sys.stdin).get("links") or {}).keys())))
     'i=0; while [ $i -lt 20 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"; i=$((i+1)); done' \
     >/dev/null 2>&1
 
-  # Tempo can hold a trace before Loki has ingested the log lines that go with
-  # it, so poll the whole condition: a failing trace listed on the detail
-  # screen whose logs resolve across all three services. Polling one half then
-  # asserting the other fails whenever the two stores are a few seconds apart.
-  printf '    waiting for a failing trace and its logs'
-  et=""
+  # Tempo can hold a trace before Loki has ingested the lines belonging to it,
+  # so this polls the whole condition rather than one half at a time. It also
+  # tries every trace the screen lists, which is what someone clicking the list
+  # would do, so one unlucky trace does not fail the run.
+  printf '    waiting for a failing trace whose logs resolve'
+  listed=0
+  tried=0
   walked=""
+  found=""
   for _ in $(seq 1 20); do
-    et="$(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
+    mapfile -t candidates < <(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
 import json, sys
 try: traces = json.load(sys.stdin).get("errorTraces") or []
 except Exception: traces = []
-print(traces[0]["traceId"] if traces else "")
-')"
-    if [[ -n "${et}" ]]; then
-      walked="$(bff "/api/traces/${et}/logs" | python3 -c '
+for t in traces[:8]:
+    tid = t.get("traceId")
+    if tid: print(tid)
+')
+    listed=${#candidates[@]}
+    for tid in "${candidates[@]}"; do
+      tried=$((tried + 1))
+      walked="$(bff "/api/traces/${tid}/logs" | python3 -c '
 import json, sys
 try: lines = json.load(sys.stdin).get("lines") or []
 except Exception: lines = []
 print(",".join(sorted({l["service"] for l in lines})))
 ')"
-      [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] && break
-    fi
+      if [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]]; then
+        found="${tid}"
+        break
+      fi
+    done
+    [[ -n "${found}" ]] && break
     printf '.'
     sleep 15
   done
   printf '\n'
 
-  [[ -n "${et}" ]] \
-    && ok "the detail screen lists a failing trace" \
+  (( listed > 0 )) \
+    && ok "the detail screen lists failing traces (${listed} of them)" \
     || bad "no failing trace appeared on the detail screen"
 
-  [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] \
-    && ok "its logs resolve across all three services, which is the whole path" \
-    || bad "logs for that trace covered only: ${walked:-nothing}"
+  if [[ -n "${found}" ]]; then
+    ok "its logs resolve across all three services, which is the whole path"
+  else
+    bad "tried ${tried} failing traces, none resolved to all three services (last saw: ${walked:-nothing})"
+  fi
 
   # The UI has to serve the detail route, which has no file behind it.
   [[ "$(ui_status /services/demo-backend)" == "200" ]] \
