@@ -59,9 +59,41 @@ Grafana accepts the forwarded identity through `auth.proxy`, which the chart
 wires when oauth2-proxy is enabled. Users land signed in with the role in
 `auth.proxy.auto_sign_up`.
 
+## Gotchas found while verifying this
+
+Each of these cost time, and none of them says what is wrong in its error.
+
+**The cookie secret has to be exactly 16, 24 or 32 bytes.** oauth2-proxy exits
+on any other length without naming the setting.
+
+**Redirects off the proxy's own host need a whitelist.** Without
+`--whitelist-domain`, oauth2-proxy silently drops the redirect back to your
+upstream after sign-in.
+
+**The issuer URL has to be the address everyone uses.** oauth2-proxy verifies
+the `iss` claim against `--oidc-issuer-url`, so a provider reachable at two
+addresses will fail verification on the one it was not configured with.
+
+**A consent screen appears on every sign-in.** oauth2-proxy sends
+`approval_prompt=force` and keeps sending it even when the flag is set empty,
+which overrides a provider's own skip-consent setting. Harmless, and worth
+knowing before you go looking for the cause.
+
+**An unauthenticated API call gets a 403 where you might expect a redirect.**
+oauth2-proxy only redirects requests it takes for browser navigation, so the
+UI's `fetch` calls surface as 403 once a session expires.
+
 ## Status
 
-The wiring above is shipped and renders, and the no-auth path is covered by the
-e2e suite. **The OIDC path has not been exercised against a real identity
-provider yet.** It is on the M5 hardening list, along with the documented
-Keycloak and Entra examples the design doc asks for.
+Verified end to end. `make verify-oidc` runs Dex in the cluster as a throwaway
+provider, walks the authorization code flow the way a browser would, and
+asserts that an unauthenticated call is refused, the provider issues a code,
+the UI and the API both answer once signed in, and the signed-in identity
+reaches the proxy. CI runs it on every change.
+
+Dex and its static credentials live in `examples/dev-oidc` and are not part of
+the chart. They exist to be logged into by a script, and no real install should
+point at them.
+
+The Keycloak and Entra examples above follow the same shape and have not been
+run against those providers.

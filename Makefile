@@ -111,6 +111,10 @@ demo: up ## Build, load and deploy the demo app onto the cluster
 e2e: demo ## Full end-to-end verification against the live cluster
 	@bash scripts/e2e.sh
 
+.PHONY: verify-oidc
+verify-oidc: demo ## Sign in through a real OIDC provider and check the whole path
+	@bash scripts/verify-oidc.sh
+
 .PHONY: upgrade-test
 upgrade-test: demo ## Verify an existing install survives helm upgrade and rollback
 	@bash scripts/upgrade-test.sh

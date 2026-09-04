@@ -117,6 +117,11 @@ jobs:
       - name: Upgrade, rollback and verify data survived
         run: make upgrade-test
 
+      # The OIDC path shipped unverified for three milestones. This keeps it
+      # verified: Dex runs in-cluster and the flow is walked for real.
+      - name: Verify OIDC against a real provider
+        run: make verify-oidc
+
       - name: Dump cluster state on failure
         if: failure()
         run: |
