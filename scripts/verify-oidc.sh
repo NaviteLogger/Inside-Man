@@ -35,8 +35,19 @@ kubectl rollout status deploy/dex -n dev-oidc --timeout=3m >/dev/null 2>&1 \
   && ok "Dex is running" \
   || bad "Dex did not start"
 
-issuer="$(runner 'curl -s http://dex.dev-oidc.svc:5556/dex/.well-known/openid-configuration' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("issuer",""))' 2>/dev/null || true)"
+# A rollout being complete does not mean the Service endpoint has propagated,
+# so this polls rather than sampling the instant the pod goes Ready.
+printf '    waiting for the discovery document'
+issuer=""
+for _ in $(seq 1 20); do
+  issuer="$(runner 'curl -s http://dex.dev-oidc.svc:5556/dex/.well-known/openid-configuration' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("issuer",""))' 2>/dev/null || true)"
+  [[ -n "${issuer}" ]] && break
+  printf '.'
+  sleep 5
+done
+printf '\n'
+
 [[ "${issuer}" == "http://dex.dev-oidc.svc:5556/dex" ]] \
   && ok "discovery document served, issuer ${issuer}" \
   || bad "discovery failed (issuer: ${issuer:-none})"
