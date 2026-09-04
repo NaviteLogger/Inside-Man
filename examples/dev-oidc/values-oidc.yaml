@@ -1,0 +1,25 @@
+# Overlay that turns authentication on and points it at the throwaway Dex.
+#
+#   helm upgrade inside-man charts/inside-man -n inside-man \
+#     -f examples/dev-oidc/values-oidc.yaml
+#
+# For verifying the OIDC path only. The secrets here are public by design.
+oauth2-proxy:
+  enabled: true
+  config:
+    clientID: inside-man
+    clientSecret: inside-man-dev-secret
+    # Exactly 32 bytes. oauth2-proxy fails to start on any other length with a
+    # message that does not say so.
+    cookieSecret: 0123456789abcdef0123456789abcdef #gitleaks:allow
+  extraArgs:
+    oidc-issuer-url: http://dex.dev-oidc.svc:5556/dex
+    redirect-url: http://inside-man-oauth2-proxy.inside-man.svc:80/oauth2/callback
+    # Dex over plain HTTP in-cluster, which a real install would never do.
+    cookie-secure: "false"
+    # oauth2-proxy insists on a whitelist for any redirect off its own host.
+    whitelist-domain: ".svc"
+    # oauth2-proxy defaults to approval_prompt=force, which makes the provider
+    # show its consent screen on every sign-in and overrides Dex's
+    # skipApprovalScreen. Blank omits the parameter.
+    approval-prompt: ""

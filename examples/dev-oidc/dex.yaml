@@ -1,0 +1,81 @@
+# Dex as a throwaway OIDC provider, so the oauth2-proxy path gets verified
+# against a real issuer.
+#
+# This is test scaffolding and no part of the chart. The static client secret
+# and password are public by design, since this exists to be logged into by a
+# script. Never point a real install at it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-oidc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: dev-oidc
+data:
+  config.yaml: |
+    # The issuer has to be the address both oauth2-proxy and the browser use,
+    # or the token's iss claim will not match what the verifier expects.
+    issuer: http://dex.dev-oidc.svc:5556/dex
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      # Skips the consent screen, which a scripted login cannot click.
+      skipApprovalScreen: true
+    staticClients:
+      - id: inside-man
+        name: Inside Man
+        secret: inside-man-dev-secret
+        redirectURIs:
+          - http://inside-man-oauth2-proxy.inside-man.svc:80/oauth2/callback
+          - http://localhost:8080/oauth2/callback
+    enablePasswordDB: true
+    staticPasswords:
+      # bcrypt of "password", the Dex documentation's own example hash.
+      - email: engineer@example.com
+        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+        username: engineer
+        userID: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: dev-oidc
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dex }
+  template:
+    metadata:
+      labels: { app: dex }
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.44.0
+          args: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports: [{ containerPort: 5556 }]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+          readinessProbe:
+            httpGet: { path: /dex/healthz, port: 5556 }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: config
+          configMap: { name: dex }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: dev-oidc
+spec:
+  selector: { app: dex }
+  ports: [{ port: 5556, targetPort: 5556 }]
