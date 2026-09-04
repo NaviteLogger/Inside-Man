@@ -77,6 +77,12 @@ jobs:
           export PATH="$PWD/.tools/bin:$PATH"
           helm lint charts/inside-man
           bash -n scripts/*.sh
+
+      # Helm renders from the vendored tarballs and ignores the version in
+      # Chart.yaml, so a bump without the tarball is a no-op that still passes
+      # lint and template.
+      - name: Vendored charts match Chart.yaml
+        run: bash scripts/check-vendored-charts.sh
       # Render both profiles, otherwise the HA path rots unnoticed.
       - name: Render default (small) profile
         run: make template

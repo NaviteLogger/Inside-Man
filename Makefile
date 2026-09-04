@@ -54,8 +54,9 @@ cluster: bootstrap-cluster ## Create the local kind cluster (idempotent)
 	@kubectl cluster-info
 
 .PHONY: deps
-deps: bootstrap ## Resolve and vendor chart dependencies into $(CHART)/charts
+deps: bootstrap-helm ## Resolve and vendor chart dependencies into $(CHART)/charts
 	@helm dependency update $(CHART)
+	@bash scripts/check-vendored-charts.sh
 
 .PHONY: images
 images: cluster ## Build the BFF and UI images and load them into the cluster
@@ -77,6 +78,7 @@ down: ## Delete the local kind cluster
 .PHONY: lint
 lint: bootstrap-helm ## Lint the chart, shell scripts, Go and TypeScript
 	@helm lint $(CHART)
+	@bash scripts/check-vendored-charts.sh
 	@bash -n scripts/*.sh
 	@cd bff && gofmt -l . | (! grep .) && go vet ./...
 	@cd ui && npm ci --silent && npm run typecheck
