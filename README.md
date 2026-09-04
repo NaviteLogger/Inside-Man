@@ -91,6 +91,7 @@ spec.
 - [bff/openapi.yaml](bff/openapi.yaml), the API contract
 - [docs/design.md](docs/design.md), the original specification
 - [docs/join-key.md](docs/join-key.md), the convention every screen depends on
+- [docs/runbook.md](docs/runbook.md), what to do when Inside Man itself misbehaves
 - [docs/decisions/](docs/decisions/), the accepted decision records
 - [docs/v2-backlog.md](docs/v2-backlog.md), what is parked and why
 

@@ -4,6 +4,17 @@
 insideMan:
   clusterName: inside-man
 
+  # Retention, in one place. Design doc 7 asks for a single knob, and these
+  # values are what the templates below feed to each store. Changing a number
+  # here changes the store that holds that signal, so the three cannot drift.
+  #
+  # Traces are the bulkiest per request and the least useful once cold, which
+  # is why they keep the shortest window.
+  retention:
+    traces: 7d
+    logs: 14d
+    metrics: 30d
+
   # Health thresholds (design doc 5.2). Override per service with the
   # insideman.io/slo-p95 annotation.
   health:
@@ -236,12 +247,14 @@ prometheus:
         - /etc/inside-man/*.rules
   server:
     fullnameOverride: inside-man-prometheus
+    # Set from insideMan.retention.metrics by templates/retention.yaml, which
+    # fails the render if the two disagree.
+    retention: 30d
     extraConfigmapMounts:
       - name: inside-man-alert-rules
         mountPath: /etc/inside-man
         configMap: inside-man-alert-rules
         readOnly: true
-    retention: 15d
     # extraFlags carries argumentless flags. The chart's extraArgs map cannot
     # express one: a null value in a values file is a delete instruction to
     # Helm's coalescing, so the key never reaches the template.
@@ -295,6 +308,25 @@ loki:
       allow_structured_metadata: true
       volume_enabled: true
       retention_period: 336h
+  # The gateway carries required pod anti-affinity on the hostname, and a
+  # Deployment's default rolling update creates the new pod before removing the
+  # old one. On a single node the new pod can never schedule, so helm upgrade
+  # fails with "Progress deadline exceeded". The StatefulSet below is unaffected
+  # because it deletes before it creates.
+  #
+  # maxSurge 0 removes the old pod before creating the new one, so the new pod
+  # can take the same node. Switching the strategy type to Recreate would do it
+  # too, but Kubernetes rejects the change on an existing Deployment while the
+  # old rollingUpdate block is still set.
+  #
+  # It costs a few seconds of gateway downtime on upgrade, which the ha profile
+  # avoids by having somewhere else to put the pod.
+  gateway:
+    deploymentStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
   singleBinary:
     replicas: 1
     persistence:

@@ -110,3 +110,7 @@ demo: up ## Build, load and deploy the demo app onto the cluster
 .PHONY: e2e
 e2e: demo ## Full end-to-end verification against the live cluster
 	@bash scripts/e2e.sh
+
+.PHONY: upgrade-test
+upgrade-test: demo ## Verify an existing install survives helm upgrade and rollback
+	@bash scripts/upgrade-test.sh
