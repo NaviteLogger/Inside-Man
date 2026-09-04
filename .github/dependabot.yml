@@ -17,6 +17,14 @@ updates:
       # version". Split across two PRs, neither one can pass.
       react:
         patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+    ignore:
+      # TypeScript 7, the native port, is stable on npm, but every
+      # openapi-typescript release still declares peer typescript@^5.x and we
+      # generate the UI's types with it (ADR 0001), so npm ci fails outright.
+      # Minor and patch updates still come through. Drop this once that peer
+      # widens: https://github.com/openapi-ts/openapi-typescript
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /examples/demo-app/api
