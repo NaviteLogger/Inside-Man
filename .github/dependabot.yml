@@ -12,6 +12,11 @@ updates:
       # cannot pass on their own.
       build-tooling:
         patterns: ["vite", "vitest", "@vitejs/*"]
+      # React refuses to start when react and react-dom differ by even a patch
+      # release: "the react and react-dom packages must have the exact same
+      # version". Split across two PRs, neither one can pass.
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
 
   - package-ecosystem: pip
     directory: /examples/demo-app/api
