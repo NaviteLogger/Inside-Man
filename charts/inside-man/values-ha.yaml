@@ -12,6 +12,18 @@
 # Both are left blank below, so an install fails with a clear message and never
 # comes up half-working.
 
+# Retention. This profile has the storage to keep more, so the knob moves and
+# the stores below follow it. templates/retention.yaml fails the render when
+# they drift, which is how the 30d Loki setting below was caught disagreeing
+# with the 14d default.
+#
+# Only logs are checked here. Traces and metrics are held by tempo-distributed
+# and Mimir in this profile, and both manage retention through their own
+# compactor settings against object storage, which the guard does not read.
+insideMan:
+  retention:
+    logs: 30d
+
 prometheus:
   enabled: false
 

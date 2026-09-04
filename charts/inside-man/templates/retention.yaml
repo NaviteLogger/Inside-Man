@@ -1,0 +1,48 @@
+{{/*
+Retention lives in insideMan.retention, but each store reads it from its own
+subchart values, and Helm does not template a values file. So the numbers are
+written twice and this asserts they agree, failing the render with the exact
+fix when they drift.
+
+Same shape as scripts/check-vendored-charts.sh: the duplication is forced by
+the tool, so the guard is where the safety comes from.
+*/}}
+{{- $r := .Values.insideMan.retention }}
+
+{{- /* Stores want hours; the knob is expressed in days. */}}
+{{- $tracesHours := printf "%dh" (mul 24 (int (trimSuffix "d" $r.traces))) }}
+{{- $logsHours := printf "%dh" (mul 24 (int (trimSuffix "d" $r.logs))) }}
+
+{{- if .Values.tempo.enabled }}
+{{- $tempo := .Values.tempo.tempo.retention }}
+{{- if ne (toString $tempo) $tracesHours }}
+{{- fail (printf "retention drift: insideMan.retention.traces is %s (%s) but tempo.tempo.retention is %s. Set tempo.tempo.retention to %s." $r.traces $tracesHours $tempo $tracesHours) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.loki.enabled }}
+{{- $loki := .Values.loki.loki.limits_config.retention_period }}
+{{- if ne (toString $loki) $logsHours }}
+{{- fail (printf "retention drift: insideMan.retention.logs is %s (%s) but loki.loki.limits_config.retention_period is %s. Set it to %s." $r.logs $logsHours $loki $logsHours) }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.prometheus.enabled }}
+{{- $prom := .Values.prometheus.server.retention }}
+{{- if ne (toString $prom) (toString $r.metrics) }}
+{{- fail (printf "retention drift: insideMan.retention.metrics is %s but prometheus.server.retention is %s. Set them the same." $r.metrics $prom) }}
+{{- end }}
+{{- end }}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "inside-man.fullname" . }}-retention
+  labels:
+    {{- include "inside-man.labels" . | nindent 4 }}
+data:
+  # Recorded so an operator can read back what the install was configured with
+  # without inspecting three different subcharts.
+  traces: {{ $r.traces | quote }}
+  logs: {{ $r.logs | quote }}
+  metrics: {{ $r.metrics | quote }}
