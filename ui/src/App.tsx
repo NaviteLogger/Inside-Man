@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Diagnostics } from './Diagnostics';
+import { Issues } from './Issues';
+import { ServiceMap } from './ServiceMap';
 import { ServiceDetail } from './ServiceDetail';
 import { ServicesTable } from './ServicesTable';
 import { fetchServices } from './api';
@@ -9,6 +11,8 @@ const REFRESH_MS = 15_000;
 
 type Route =
   | { view: 'services' }
+  | { view: 'map' }
+  | { view: 'issues' }
   | { view: 'diagnostics' }
   | { view: 'service'; name: string; namespace?: string };
 
@@ -16,6 +20,8 @@ type Route =
 function routeFromLocation(): Route {
   const { pathname, searchParams } = new URL(window.location.href);
   if (pathname.startsWith('/diagnostics')) return { view: 'diagnostics' };
+  if (pathname.startsWith('/map')) return { view: 'map' };
+  if (pathname.startsWith('/issues')) return { view: 'issues' };
 
   const match = /^\/services\/([^/]+)/.exec(pathname);
   if (match) {
@@ -32,6 +38,10 @@ function hrefFor(route: Route): string {
   switch (route.view) {
     case 'diagnostics':
       return '/diagnostics';
+    case 'map':
+      return '/map';
+    case 'issues':
+      return '/issues';
     case 'service':
       return `/services/${encodeURIComponent(route.name)}` +
         (route.namespace ? `?namespace=${encodeURIComponent(route.namespace)}` : '');
@@ -87,6 +97,20 @@ export function App() {
           </button>
           <button
             type="button"
+            className={route.view === 'map' ? 'active' : ''}
+            onClick={() => navigate({ view: 'map' })}
+          >
+            Map
+          </button>
+          <button
+            type="button"
+            className={route.view === 'issues' ? 'active' : ''}
+            onClick={() => navigate({ view: 'issues' })}
+          >
+            Issues
+          </button>
+          <button
+            type="button"
             className={route.view === 'diagnostics' ? 'active' : ''}
             onClick={() => navigate({ view: 'diagnostics' })}
           >
@@ -101,6 +125,10 @@ export function App() {
       <main>
         {route.view === 'diagnostics' ? (
           <Diagnostics />
+        ) : route.view === 'map' ? (
+          <ServiceMap onSelect={(name, namespace) => navigate({ view: 'service', name, namespace })} />
+        ) : route.view === 'issues' ? (
+          <Issues onSelect={(name, namespace) => navigate({ view: 'service', name, namespace })} />
         ) : route.view === 'service' ? (
           <ServiceDetail
             name={route.name}
