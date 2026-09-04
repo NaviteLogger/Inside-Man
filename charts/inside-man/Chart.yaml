@@ -66,7 +66,7 @@ dependencies:
 
   # Visualisation and auth.
   - name: grafana
-    version: 13.0.1
+    version: 13.1.0
     repository: https://grafana-community.github.io/helm-charts
     condition: grafana.enabled
 

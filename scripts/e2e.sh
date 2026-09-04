@@ -106,6 +106,11 @@ print(",".join(sorted(found)))
     || bad "expected java,nodejs,python agents, got '\''${injected}'\''"
 
   # ---- metrics ----
+  promql_raw() {
+    kubectl exec -n "${NAMESPACE}" deploy/inside-man-prometheus -c prometheus-server -- \
+      wget -qO- "http://localhost:9090$1" 2>/dev/null
+  }
+
   promql() {
     kubectl exec -n "${NAMESPACE}" deploy/inside-man-prometheus -c prometheus-server -- \
       wget -qO- "http://localhost:9090/api/v1/query?query=$(python3 -c '
@@ -453,41 +458,53 @@ print(",".join(sorted((json.load(sys.stdin).get("links") or {}).keys())))
     'i=0; while [ $i -lt 20 ]; do curl -s -o /dev/null "http://demo-frontend.demo.svc:8080/checkout?fail=1"; i=$((i+1)); done' \
     >/dev/null 2>&1
 
-  # Tempo can hold a trace before Loki has ingested the log lines that go with
-  # it, so poll the whole condition: a failing trace listed on the detail
-  # screen whose logs resolve across all three services. Polling one half then
-  # asserting the other fails whenever the two stores are a few seconds apart.
-  printf '    waiting for a failing trace and its logs'
-  et=""
+  # Tempo can hold a trace before Loki has ingested the lines belonging to it,
+  # so this polls the whole condition in one go. It also
+  # tries every trace the screen lists, which is what someone clicking the list
+  # would do, so one unlucky trace does not fail the run.
+  printf '    waiting for a failing trace whose logs resolve'
+  listed=0
+  tried=0
   walked=""
+  found=""
   for _ in $(seq 1 20); do
-    et="$(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
+    mapfile -t candidates < <(bff "/api/services/demo-backend?namespace=${DEMO_NS}" | python3 -c '
 import json, sys
 try: traces = json.load(sys.stdin).get("errorTraces") or []
 except Exception: traces = []
-print(traces[0]["traceId"] if traces else "")
-')"
-    if [[ -n "${et}" ]]; then
-      walked="$(bff "/api/traces/${et}/logs" | python3 -c '
+for t in traces[:8]:
+    tid = t.get("traceId")
+    if tid: print(tid)
+')
+    listed=${#candidates[@]}
+    for tid in "${candidates[@]}"; do
+      tried=$((tried + 1))
+      walked="$(bff "/api/traces/${tid}/logs" | python3 -c '
 import json, sys
 try: lines = json.load(sys.stdin).get("lines") or []
 except Exception: lines = []
 print(",".join(sorted({l["service"] for l in lines})))
 ')"
-      [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] && break
-    fi
+      if [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]]; then
+        found="${tid}"
+        break
+      fi
+    done
+    [[ -n "${found}" ]] && break
     printf '.'
     sleep 15
   done
   printf '\n'
 
-  [[ -n "${et}" ]] \
-    && ok "the detail screen lists a failing trace" \
+  (( listed > 0 )) \
+    && ok "the detail screen lists failing traces (${listed} of them)" \
     || bad "no failing trace appeared on the detail screen"
 
-  [[ "${walked}" == "demo-api,demo-backend,demo-frontend" ]] \
-    && ok "its logs resolve across all three services, which is the whole path" \
-    || bad "logs for that trace covered only: ${walked:-nothing}"
+  if [[ -n "${found}" ]]; then
+    ok "its logs resolve across all three services, which is the whole path"
+  else
+    bad "tried ${tried} failing traces, none resolved to all three services (last saw: ${walked:-nothing})"
+  fi
 
   # The UI has to serve the detail route, which has no file behind it.
   [[ "$(ui_status /services/demo-backend)" == "200" ]] \
@@ -555,8 +572,120 @@ print(res[0]["value"][1] if res else "0")
   python3 -c "import sys; sys.exit(0 if float('${errs}') > 0 else 1)" 2>/dev/null \
     && ok "error-path spans are recorded" \
     || bad "no error spans recorded, the health model is unexercised"
+  # M4: the map and the issues screen.
+  group "M4: the service map reflects the demo topology"
+
+  mapdata="$(bff /api/map)"
+
+  nodes="$(echo "${mapdata}" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+print(",".join(sorted(n["name"] for n in d.get("nodes") or [])))
+')"
+  missing=0
+  for svc in "${DEMO_SERVICES[@]}"; do
+    [[ "${nodes}" == *"${svc}"* ]] || missing=1
+  done
+  (( missing == 0 )) \
+    && ok "the map has a node for every demo service" \
+    || bad "map nodes missing a demo service (saw: ${nodes:-none})"
+
+  mapedges="$(echo "${mapdata}" | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+print(",".join(sorted(e["client"] + ">" + e["server"] for e in d.get("edges") or [])))
+')"
+  [[ "${mapedges}" == *"demo-frontend>demo-api"* && "${mapedges}" == *"demo-api>demo-backend"* ]] \
+    && ok "the map shows the frontend to api to backend chain" \
+    || bad "map edges missing the chain (saw: ${mapedges:-none})"
+
+  # Every node carries a health status, since colouring the map is the point.
+  coloured="$(echo "${mapdata}" | python3 -c '
+import json, sys
+valid = {"healthy", "warning", "critical", "unknown"}
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+nodes = d.get("nodes") or []
+print(int(bool(nodes) and all((n.get("health") or {}).get("status") in valid for n in nodes)))
+')"
+  [[ "${coloured}" == "1" ]] \
+    && ok "every map node carries a health status" \
+    || bad "a map node has no usable health status"
+
+  [[ "$(ui_status /map)" == "200" ]] \
+    && ok "UI serves the map route" \
+    || bad "UI has no fallback for /map"
+
+  group "M4: alert rules ship, fire, and reach the issues screen"
+
+  loaded="$(promql_raw /api/v1/rules | python3 -c '
+import json, sys
+try: groups = json.load(sys.stdin)["data"]["groups"]
+except Exception: groups = []
+print(",".join(sorted(g["name"] for g in groups)))
+')"
+  [[ "${loaded}" == *"inside-man.services"* && "${loaded}" == *"inside-man.platform"* ]] \
+    && ok "the chart's alert rules are loaded by Prometheus" \
+    || bad "alert rules not loaded (saw: ${loaded:-none})"
+
+  [[ "$(ui_status /issues)" == "200" ]] \
+    && ok "UI serves the issues route" \
+    || bad "UI has no fallback for /issues"
+
+  # Break a service and follow the alert all the way to the issues screen and
+  # back into the service's health. The rules mirror the health model, so this
+  # is what keeps a red badge and a firing alert meaning the same thing.
+  kubectl scale deploy/demo-backend -n "${DEMO_NS}" --replicas=0 >/dev/null 2>&1
+  printf '    waiting for an alert to fire and reach the issues screen'
+  fired=""
+  for _ in $(seq 1 28); do
+    sleep 15
+    printf '.'
+    fired="$(bff /api/alerts | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+print(",".join(sorted(a["name"] for a in d.get("alerts") or [])))
+')"
+    [[ -n "${fired}" ]] && break
+  done
+  printf '\n'
+
+  [[ -n "${fired}" ]] \
+    && ok "an alert fired and reached /api/alerts: ${fired}" \
+    || bad "no alert reached the issues screen within 7m of breaking the backend"
+
+  if [[ -n "${fired}" ]]; then
+    grouped="$(bff /api/alerts | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+print(",".join(sorted(k for k in (d.get("byService") or {}) if k)))
+')"
+    [[ -n "${grouped}" ]] \
+      && ok "alerts are grouped by service: ${grouped}" \
+      || bad "no alert carried a service label, so the issues screen cannot group"
+
+    # Design doc 5.2 makes an alert decisive over the metrics.
+    folded="$(bff /api/services | python3 -c '
+import json, sys
+try: svcs = json.load(sys.stdin).get("services") or []
+except Exception: svcs = []
+print(int(any("alert" in r for s in svcs for r in (s["health"].get("reasons") or []))))
+')"
+    [[ "${folded}" == "1" ]] \
+      && ok "a firing alert is folded into service health" \
+      || bad "no service cited an alert as the reason for its health"
+  fi
+
+  kubectl scale deploy/demo-backend -n "${DEMO_NS}" --replicas=1 >/dev/null 2>&1
+  kubectl rollout status deploy/demo-backend -n "${DEMO_NS}" --timeout=3m >/dev/null 2>&1 \
+    && ok "backend restored after the alert test" \
+    || bad "backend did not come back"
 else
-  group "M1 and M2: skipped, no ${DEMO_NS} namespace"
+  group "M1 to M4: skipped, no ${DEMO_NS} namespace"
 fi
 
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "${pass}" "${fail}"

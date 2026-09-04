@@ -17,7 +17,7 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # gitleaks scans commit history
       - name: Secret scan
@@ -31,8 +31,8 @@ jobs:
     name: Unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: bff/go.mod
           cache-dependency-path: bff/go.sum
@@ -70,7 +70,7 @@ jobs:
     name: Chart lint and render
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Helm lint
         run: |
           bash scripts/bootstrap.sh helm
@@ -102,7 +102,7 @@ jobs:
         # Latest is tested too, to catch breakage before users do.
         k8s: ["v1.36.4", "v1.37.0"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Run end-to-end suite
         run: make e2e KIND_IMAGE=kindest/node:${{ matrix.k8s }}
       - name: Dump cluster state on failure
