@@ -60,6 +60,17 @@ small reviewable risk for a large permanent maintenance burden.
   will bridge it correctly.
 - Provenance verification against pre-split releases fails, since they were
   signed with a different key.
+- Vendoring has a failure mode of its own. Helm renders from the tarballs in
+  `charts/` and ignores the version in `Chart.yaml`, so a bump that updates
+  `Chart.yaml` without the tarball installs the old chart while claiming the
+  new one, and passes both lint and template. It happened: grafana 13.1.0
+  merged while the cluster kept running 13.0.1. `scripts/check-vendored-charts.sh`
+  now fails CI when the two disagree.
+- Vendoring also means a chart bump takes a step Dependabot cannot do. Its PR
+  updates `Chart.yaml` and `Chart.lock` and stops there, so the guard fails it.
+  Take the bump by hand instead: edit `Chart.yaml`, run
+  `helm dependency update charts/inside-man`, and commit the new tarballs
+  alongside. `make deps` does both and then checks.
 - Escape hatch, available but not taken: Grafana, Loki-monolithic and
   Tempo-monolithic are each roughly a Deployment, a ConfigMap and a Service, and
   the images are unaffected.

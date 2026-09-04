@@ -13,7 +13,7 @@ dependencies:
   version: 6.2.0
 - name: loki
   repository: https://grafana-community.github.io/helm-charts
-  version: 18.11.7
+  version: 18.12.0
 - name: tempo
   repository: https://grafana-community.github.io/helm-charts
   version: 2.3.0
@@ -22,9 +22,9 @@ dependencies:
   version: 3.5.1
 - name: grafana
   repository: https://grafana-community.github.io/helm-charts
-  version: 13.1.0
+  version: 13.2.0
 - name: oauth2-proxy
   repository: https://oauth2-proxy.github.io/manifests
   version: 10.7.0
-digest: sha256:47ac16d18bf86a9e694d3247b18adc4618c425cf76160ce8dbd13c6ab3e65e94
-generated: "2026-09-03T15:53:19.793775576Z"
+digest: sha256:6bb1e6b7a5d3fbd68d804ff1bdf08f1945d4b2e79c2d71a0e65af696fb63d38e
+generated: "2026-09-04T11:22:56.180774998Z"
